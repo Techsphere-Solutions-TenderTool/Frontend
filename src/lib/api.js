@@ -1,29 +1,20 @@
+// src/lib/api.js
 const BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
 
-function qs(params = {}) {
-  const q = new URLSearchParams();
-  Object.entries(params).forEach(([k, v]) => {
-    if (v !== undefined && v !== null && v !== '') q.append(k, String(v));
+function qs(obj = {}) {
+  const p = new URLSearchParams();
+  Object.entries(obj).forEach(([k, v]) => {
+    if (v !== undefined && v !== null && v !== '') p.append(k, String(v));
   });
-  const s = q.toString();
+  const s = p.toString();
   return s ? `?${s}` : '';
 }
 
-// fetch helper with timeout + better error messages
-async function http(path, { method = 'GET', headers = {}, body, signal, timeoutMs = 15000 } = {}) {
+async function http(path, { timeoutMs = 15000 } = {}) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(`${BASE}${path}`, {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(import.meta.env.VITE_API_KEY ? { 'x-api-key': import.meta.env.VITE_API_KEY } : {}),
-        ...headers,
-      },
-      body,
-      signal: signal || ctrl.signal,
-    });
+    const res = await fetch(`${BASE}${path}`, { signal: ctrl.signal });
     const text = await res.text().catch(() => '');
     if (!res.ok) throw new Error(`HTTP ${res.status} – ${text || 'no body'}`);
     return text ? JSON.parse(text) : null;
@@ -32,59 +23,55 @@ async function http(path, { method = 'GET', headers = {}, body, signal, timeoutM
   }
 }
 
-// normalize whatever your API returns into the shape the table expects
+// Map AWS → UI
 function normalizeListPayload(data) {
-  const raw   = Array.isArray(data) ? data : (data.items ?? data.results ?? data.records ?? data.data ?? []);
-  const total = data.total ?? data.count ?? data.totalCount ?? raw.length;
+  // Your AWS sample: { total, limit, offset, results: [...] }
+  const raw   = Array.isArray(data) ? data : (data.results ?? data.items ?? []);
+  const total = data.total ?? raw.length;
 
   const items = raw.map(r => ({
-    id:            r.id ?? r.ocid ?? r.tenderId ?? r._id ?? r.referenceNumber,
-    title:         r.title ?? r.tender?.title ?? r.name ?? '(no title)',
-    buyer:         r.buyer?.name ?? r.buyerName ?? r.buyer ?? r.issuer ?? '—',
-    source:        r.source ?? r.platform ?? r.origin ?? r.category ?? '—',
-    published_at:  r.published_at ?? r.date ?? r.publishedAt ?? r.publicationDate ?? r.tender?.tenderPeriod?.startDate ?? null,
-    closing_at:    r.closing_at ?? r.closeDate ?? r.closingAt ?? r.closingDateTime ?? r.tender?.tenderPeriod?.endDate ?? null,
-    summary:       r.summary ?? r.description ?? '',
-    sourceUrl:     r.sourceUrl ?? r.url ?? r.link ?? null,
-    location:      r.location ?? r.region ?? '',
-    referenceNumber: r.referenceNumber ?? r.id ?? '',
+    id:         r.id ?? r.referenceNumber ?? r._id,
+    title:      r.title ?? r.name ?? '(no title)',
+    buyer:      r.buyer ?? r.issuer ?? '—',
+    category:   r.category ?? '—',
+    status:     r.status ?? '',
+    source:     'ESKOM',                // optional: you can derive from source_id if you like
+    published_at: r.published_at ?? null,
+    closing_at:   r.closing_at ?? null,
+    location:     r.location ?? '',
+    url:          r.url ?? null,
+    summary:      r.summary ?? '',      // not in sample, safe default
   }));
 
   return { items, total };
 }
 
-export async function listTenders(params = {}) {
-  const {
-    page = 1,
-    pageSize = 20,
-    q = '',
-    sort = '-closing_at',     // "field" or "-field"
-    status = '',
-    buyer = '',
-    source = '',
-    published_from = '',
-    published_to = '',
-  } = params;
-
-  const query = { page, pageSize, q, sort, status, buyer, source, published_from, published_to };
+export async function listTenders({ page = 1, pageSize = 20, q = '', sort = '-closing_at' } = {}) {
+  // If your API uses page & pageSize, keep as-is. If it uses limit/offset, change here.
+  const query = { page, pageSize, q, sort };
   const data = await http(`/tenders${qs(query)}`);
   return normalizeListPayload(data);
 }
 
-export async function getTender(id) {
+// (Optional) If you later add /tenders/:id upstream, this will work:
+export async function getTenderById(id) {
   return http(`/tenders/${encodeURIComponent(id)}`);
 }
 
-export async function getDocuments(id) {
-  const data = await http(`/tenders/${encodeURIComponent(id)}/documents`);
-  const items = Array.isArray(data) ? data : (data.items ?? data.results ?? data.data ?? []);
-  return { items };
-}
+/* ------- tiny session cache for details refresh ------- */
+const CACHE_KEY = 'tender_cache_v1';
 
-export async function getContacts(id) {
-  const data = await http(`/tenders/${encodeURIComponent(id)}/contacts`);
-  const items = Array.isArray(data) ? data : (data.items ?? data.results ?? data.data ?? []);
-  return { items };
+function readCache() {
+  try { return JSON.parse(sessionStorage.getItem(CACHE_KEY) || '{}'); }
+  catch { return {}; }
+}
+function writeCache(obj) { sessionStorage.setItem(CACHE_KEY, JSON.stringify(obj)); }
+
+export function cacheTender(row) {
+  const c = readCache(); c[row.id] = row; writeCache(c);
+}
+export function getCachedTender(id) {
+  const c = readCache(); return c[id] || null;
 }
 
 /** Optional: SNS stub remains unchanged */

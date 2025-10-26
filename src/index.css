@@ -1,8 +1,0 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-/* Optional: a tiny base tweak that plays nice with Tailwind */
-@layer base {
-  html, body, #root { height: 100%; }
-}
