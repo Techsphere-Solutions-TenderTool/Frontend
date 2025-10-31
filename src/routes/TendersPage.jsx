@@ -1,5 +1,7 @@
+// src/routes/TendersPage.jsx
 import { useEffect, useMemo, useState } from "react";
-import { listTenders } from "../lib/api.js";
+import { Link } from "react-router-dom";
+import { listTenders, cacheTender } from "../lib/api.js";
 import Pager from "../ui/Pager.jsx";
 import useDebouncedValue from "../hooks/useDebouncedValue.js";
 
@@ -10,7 +12,7 @@ export default function TendersPage() {
   // paging & sorting
   const [page, setPage] = useState(1);
   const [pageSize] = useState(20);
-  const [sort, setSort] = useState("-closing_at"); // "-field" => desc
+  const [sort, setSort] = useState("-published_at");
 
   // search
   const [q, setQ] = useState("");
@@ -20,13 +22,20 @@ export default function TendersPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // Reset to page 1 whenever the search text changes
-  useEffect(() => { setPage(1); }, [qDebounced]);
+  // whenever search text changes → go back to page 1
+  useEffect(() => {
+    setPage(1);
+  }, [qDebounced]);
 
-  // Build a stable filter object (memo avoids needless renders)
-  const filters = useMemo(() => ({
-    page, pageSize, q: qDebounced, sort
-  }), [page, pageSize, qDebounced, sort]);
+  const filters = useMemo(
+    () => ({
+      page,
+      pageSize,
+      q: qDebounced,
+      sort,
+    }),
+    [page, pageSize, qDebounced, sort]
+  );
 
   useEffect(() => {
     let alive = true;
@@ -42,112 +51,94 @@ export default function TendersPage() {
         if (!alive) return;
         setRows([]);
         setTotal(0);
-        setError(e?.message ? String(e.message) : "Failed to load tenders.");
+        setError(e?.message || "Failed to load tenders.");
       } finally {
         if (alive) setLoading(false);
       }
     })();
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, [filters]);
 
   return (
     <div
-      className="glass-panel p-6"
-      style={{ "--panel-bg": 0.09, "--panel-ol": 0.55, "--panel-thickness": "2.5px" }}
+      className="glass-panel tender-shell"
+      style={{ "--panel-bg": 0.05, "--panel-ol": 0.55, "--panel-thickness": "2.5px" }}
     >
-      <h2 className="text-xl md:text-2xl font-semibold mb-4">Tenders</h2>
-
-      {/* Filters */}
-      <div className="mb-4 flex flex-wrap gap-3 items-center">
-        <input
-          className="input input-bordered w-full max-w-md"
-          placeholder="Search title/description…"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          aria-label="Search tenders"
-        />
-        <select
-          className="select select-bordered"
-          value={sort}
-          onChange={(e) => setSort(e.target.value)}
-          title="Sort order"
-          aria-label="Sort tenders"
-        >
-          <option value="-closing_at">Closing soon (desc)</option>
-          <option value="closing_at">Closing (asc)</option>
-          <option value="-published_at">Newest</option>
-          <option value="published_at">Oldest</option>
-        </select>
-
-        {qDebounced && (
-          <button
-            className="btn btn-outline ts"
-            onClick={() => setQ("")}
-            title="Clear search"
+      {/* header + filters */}
+      <div className="flex flex-wrap gap-3 items-center justify-between mb-4">
+        <h2 className="text-xl md:text-2xl font-semibold">Tenders</h2>
+        <div className="flex flex-wrap gap-3">
+          <input
+            className="input input-bordered w-full md:w-72"
+            placeholder="Search title/description…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+          <select
+            className="select select-bordered"
+            value={sort}
+            onChange={(e) => setSort(e.target.value)}
           >
-            Clear
-          </button>
+            <option value="-published_at">Newest</option>
+            <option value="published_at">Oldest</option>
+            <option value="-closing_at">Closing soon</option>
+            <option value="closing_at">Closing (asc)</option>
+          </select>
+          {qDebounced && (
+            <button className="btn btn-outline ts" onClick={() => setQ("")}>
+              Clear
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* loading / error */}
+      {loading && <div className="opacity-75 mb-3">Loading tenders…</div>}
+      {error && <div className="alert alert-error mb-3">{error}</div>}
+
+      {/* list */}
+      <div className="tender-list-pro">
+        {!loading && !error && rows.length === 0 ? (
+          <div className="opacity-70 py-10 text-center">No tenders found.</div>
+        ) : (
+          rows.map((t) => {
+            const tidyId = t.id ?? t.referenceNumber;
+            return (
+              <div key={tidyId} className="tender-card-pro">
+                <div className="tender-card-body">
+                  <div className="flex gap-2 flex-wrap mb-2">
+                    {t.category && <span className="chip chip-blue">{t.category}</span>}
+                    {t.buyer && <span className="chip chip-cyan">{t.buyer}</span>}
+                    {t.source && <span className="chip chip-magenta">{t.source}</span>}
+                  </div>
+                  <div className="tender-card-title">{t.title || "Untitled tender"}</div>
+                  {t.location && <div className="tender-card-sub">{t.location}</div>}
+                  <div className="tender-meta-line">
+                    <span>Published: {fmtDate(t.published_at)}</span>
+                    <span>Closes: {fmtDateTime(t.closing_at)}</span>
+                  </div>
+                </div>
+                <div className="tender-actions">
+                  <Link
+                    to={`/tenders/${tidyId}`}
+                    state={{ row: { ...t, id: tidyId } }}
+                    onClick={() => cacheTender({ ...t, id: tidyId })}
+                    className="tender-view-btn"
+                  >
+                    View Details
+                  </Link>
+                  <span className="tender-source-light">{t.source || "Original"}</span>
+                </div>
+              </div>
+            );
+          })
         )}
       </div>
 
-      {/* Status banners */}
-      {loading && (
-        <div className="opacity-80 mb-3">Loading tenders…</div>
-      )}
-      {error && (
-        <div className="alert alert-error mb-3">
-          <span>Error: {error}</span>
-          <button className="btn btn-sm ml-3" onClick={() => setPage(p => p)}>Retry</button>
-        </div>
-      )}
-
-      {/* Table */}
-      <div className="overflow-x-auto">
-        <table className="table table-sticky w-full">
-          <thead>
-            <tr>
-              <th>Title</th>
-              <th>Buyer</th>
-              <th>Source</th>
-              <th>Published</th>
-              <th>Closes</th>
-              <th>Ref #</th>
-            </tr>
-          </thead>
-          <tbody>
-            {!loading && !error && rows.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="py-8 text-center opacity-70">
-                  No tenders found.
-                </td>
-              </tr>
-            ) : (
-              rows.map((t) => (
-                <tr key={t.referenceNumber ?? t.id}>
-                  <td className="max-w-[28rem]">
-                    {t.sourceUrl ? (
-                      <a className="link" href={t.sourceUrl} target="_blank" rel="noreferrer">
-                        {t.title}
-                      </a>
-                    ) : (
-                      <span>{t.title}</span>
-                    )}
-                    {t.summary && <div className="text-sm opacity-70">{t.summary}</div>}
-                  </td>
-                  <td>{t.buyer || "—"}</td>
-                  <td>{t.source || "—"}</td>
-                  <td>{fmtDate(t.published_at)}</td>
-                  <td>{fmtDateTime(t.closing_at)}</td>
-                  <td>{t.referenceNumber ?? t.id ?? "—"}</td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Pager */}
-      <div className="mt-4 flex items-center gap-3">
+      {/* pager */}
+      <div className="mt-5 flex gap-3 items-center">
         <Pager
           page={page}
           pageSize={pageSize}
@@ -155,10 +146,15 @@ export default function TendersPage() {
           onPrev={() => setPage((p) => Math.max(1, p - 1))}
           onNext={() => setPage((p) => p + 1)}
         />
+        <span className="text-sm opacity-60">{total ? `${total} tenders` : ""}</span>
       </div>
     </div>
   );
 }
 
-function fmtDate(d)     { return d ? new Date(d).toLocaleDateString() : ""; }
-function fmtDateTime(d) { return d ? new Date(d).toLocaleString()     : ""; }
+function fmtDate(d) {
+  return d ? new Date(d).toLocaleDateString() : "—";
+}
+function fmtDateTime(d) {
+  return d ? new Date(d).toLocaleString() : "—";
+}
