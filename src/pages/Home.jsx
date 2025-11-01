@@ -1,412 +1,699 @@
 // src/pages/Home.jsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
+import { Link } from "react-router-dom";
+import { useAuth } from "react-oidc-context";
 import { listTenders } from "../lib/api";
-import {
-  PieChart,
-  Pie,
-  Cell,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-} from "recharts";
+
+// icons
+import { MapPin, CalendarDays, Clock4, ExternalLink, Star } from "lucide-react";
 
 export default function Home() {
-  const [tenders, setTenders] = useState([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [selectedCategories, setSelectedCategories] = useState(new Set());
-  const [selectedBuyers, setSelectedBuyers] = useState(new Set());
+  const auth = useAuth();
 
-  useEffect(() => {
-    async function fetchAllTenders() {
+  // for hero + “latest opportunities”
+  const [latest, setLatest] = useState([]);
+  const [latestTotal, setLatestTotal] = useState(0);
+  const [sources, setSources] = useState([
+    { id: "eskom", name: "Eskom Tender Bulletin" },
+    { id: "sanral", name: "SANRAL" },
+    { id: "transnet", name: "Transnet" },
+    { id: "etenders", name: "National eTenders" },
+  ]);
+  const [loadingLatest, setLoadingLatest] = useState(true);
+
+  // quick search form
+  const [q, setQ] = useState("");
+  const [source, setSource] = useState("");
+  const [closingBefore, setClosingBefore] = useState("");
+
+  // show results on the **home** page
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchRan, setSearchRan] = useState(false);
+  const [searchTitle, setSearchTitle] = useState("");
+
+  // ----------------------------
+  // search helper
+  // ----------------------------
+  const runSearch = useCallback(
+    async ({
+      q: qArg = q,
+      source: srcArg = source,
+      closing_before: cbArg = closingBefore,
+    } = {}) => {
+      setSearchLoading(true);
+      setSearchRan(true);
       try {
-        const resp = await listTenders({ limit: 200, offset: 0 });
-        if (!resp || typeof resp !== "object") {
-          throw new Error("Invalid API response — expected JSON");
-        }
+        const params = {
+          limit: 9,
+          offset: 0,
+        };
+        if (qArg) params.q = qArg;
+        if (srcArg) params.source = srcArg;
+        if (cbArg) params.closing_before = cbArg;
 
-        const items = resp.items ?? resp.results ?? resp ?? [];
-        setTenders(items);
-        setTotal(resp.total ?? items.length);
-        
-        // Initialize all categories and buyers as selected
-        const allCategories = new Set(items.map(t => t.category || "Uncategorized"));
-        const allBuyers = new Set(items.map(t => t.buyer || "Unknown Buyer"));
-        setSelectedCategories(allCategories);
-        setSelectedBuyers(allBuyers);
-        
-        setLoading(false);
-      } catch (err) {
-        console.error("API Error:", err);
-        setError(err.message);
-        setLoading(false);
+        const resp = await listTenders(params);
+        const items = resp.results ?? resp.items ?? [];
+        setSearchResults(items);
+
+        // build title
+        let t = "Search results";
+        const bits = [];
+        if (qArg) bits.push(`“${qArg}”`);
+        if (srcArg) bits.push(`publisher: ${srcArg}`);
+        if (cbArg) bits.push(`closing before: ${cbArg}`);
+        if (bits.length) t = `Search: ${bits.join(" • ")}`;
+        setSearchTitle(t);
+      } catch (e) {
+        console.error(e);
+        setSearchResults([]);
+        setSearchTitle("No results");
+      } finally {
+        setSearchLoading(false);
       }
-    }
+    },
+    [q, source, closingBefore]
+  );
 
-    fetchAllTenders();
+  // ----------------------------
+  // initial load
+  // ----------------------------
+  useEffect(() => {
+    let dead = false;
+
+    // 1) latest tenders for “Latest opportunities” + hero count
+    (async () => {
+      try {
+        const resp = await listTenders({ limit: 6, offset: 0, sort: "-published_at" });
+        if (dead) return;
+        const items = resp.results ?? resp.items ?? [];
+        setLatest(items);
+        setLatestTotal(resp.total ?? items.length);
+      } catch (e) {
+        console.error("Failed to load latest tenders", e);
+      } finally {
+        if (!dead) setLoadingLatest(false);
+      }
+    })();
+
+    // 2) try fetch /sources from backend (if it exists)
+    (async () => {
+      try {
+        const base = import.meta.env.VITE_API_BASE_URL;
+        if (!base) return;
+        const res = await fetch(`${base}/sources`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!dead && Array.isArray(data)) {
+          setSources(
+            data.map((s) => ({
+              id: (s.name || s.id || "").toLowerCase(),
+              name: s.name ?? s.id,
+            }))
+          );
+        }
+      } catch (e) {
+        // ignore, we already have fallback
+      }
+    })();
+
+    return () => {
+      dead = true;
+    };
   }, []);
 
-  // 🧮 Aggregate stats
-  const openTenders = tenders.filter((t) => t.status === "Open").length;
-  const closingSoon = tenders.filter((t) => t.status === "Closing Soon").length;
+  // ----------------------------
+  // form submit stays on home
+  // ----------------------------
+  async function handleQuickSearch(e) {
+    e.preventDefault();
+    runSearch();
+  }
 
-  const allTendersByCategory = Object.entries(
-    tenders.reduce((acc, t) => {
-      const key = t.category || "Uncategorized";
-      acc[key] = (acc[key] || 0) + 1;
-      return acc;
-    }, {})
-  ).map(([name, value]) => ({ name, value }));
+  function handlePublisherClick(pubId) {
+    setSource(pubId);
+    runSearch({ source: pubId });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
 
-  // Filter categories based on selection
-  const tendersByCategory = allTendersByCategory.filter(item => 
-    selectedCategories.has(item.name)
-  );
-
-  const allTendersByBuyer = Object.entries(
-    tenders.reduce((acc, t) => {
-      const key = t.buyer || "Unknown Buyer";
-      acc[key] = (acc[key] || 0) + 1;
-      return acc;
-    }, {})
-  ).map(([name, value]) => ({ name, value }));
-
-  // Filter buyers based on selection
-  const tendersByBuyer = allTendersByBuyer.filter(item => 
-    selectedBuyers.has(item.name)
-  );
-
-  const tendersByLocation = Object.entries(
-    tenders.reduce((acc, t) => {
-      const key = t.location || "Unknown Location";
-      acc[key] = (acc[key] || 0) + 1;
-      return acc;
-    }, {})
-  ).map(([name, value]) => ({ name, value }));
-
-  const COLORS = ["#4F46E5", "#10B981", "#F59E0B", "#EF4444", "#3B82F6", "#8B5CF6", "#EC4899"];
-
-  // Toggle category selection
-  const toggleCategory = (categoryName) => {
-    setSelectedCategories(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(categoryName)) {
-        newSet.delete(categoryName);
-      } else {
-        newSet.add(categoryName);
-      }
-      return newSet;
-    });
-  };
-
-  // Toggle buyer selection
-  const toggleBuyer = (buyerName) => {
-    setSelectedBuyers(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(buyerName)) {
-        newSet.delete(buyerName);
-      } else {
-        newSet.add(buyerName);
-      }
-      return newSet;
-    });
-  };
-
-  // Get color for a specific category
-  const getCategoryColor = (categoryName) => {
-    const index = allTendersByCategory.findIndex(item => item.name === categoryName);
-    return COLORS[index % COLORS.length];
-  };
-
-  // Get color for a specific buyer
-  const getBuyerColor = (buyerName) => {
-    const index = allTendersByBuyer.findIndex(item => item.name === buyerName);
-    return COLORS[index % COLORS.length];
-  };
+  function handleCategoryClick(cat) {
+    setQ(cat);
+    runSearch({ q: cat });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
 
   return (
-    <div className="space-y-8">
-      {/* Hero */}
+    <div className="space-y-10">
+      {/* HERO */}
       <div
-        className="glass-panel p-8 flex flex-col md:flex-row md:items-center md:justify-between gap-6 glow-inner rounded-xl"
-        style={{ "--panel-bg": 0.1, "--panel-ol": 0.6, "--panel-thickness": "3px" }}
+        className="glass-panel panel-thick p-8 md:p-10 flex flex-col md:flex-row md:items-center md:justify-between gap-8"
+        style={{ "--panel-bg": 0.12 }}
       >
-        <div className="max-w-2xl">
-          <h1 className="h1-pro">
-            Techsphere <span className="sr-only"> </span>TenderTool
-          </h1>
-          <p className="mt-3 text-lg opacity-90">
-            AI-assisted discovery, filtering, and analysis of South African public-sector tenders —
-            unified from multiple issuers into one fast, beautiful interface.
+        <div className="max-w-2xl space-y-5">
+          <p className="hero-pill">
+            TenderTool • South Africa
+            <span className="hero-dot" />
+            Updated daily
           </p>
-          <div className="mt-6 flex gap-3">
-            <a href="/tenders" className="btn btn-primary glow-cta">
-              Browse Tenders
-            </a>
-            <a href="/contact" className="btn btn-outline ts">
-              Talk to Us
-            </a>
+          <h1 className="h1-pro">
+            South Africa’s smartest way to find tenders — from “where do I look?” to “found it” in
+            minutes.
+          </h1>
+          <p className="text-slate-100/90 text-lg max-w-xl">
+            Search by sector, province and deadline, save what matters, and let AI read the long
+            ones.
+          </p>
+          <div className="flex flex-wrap gap-3">
+            <button onClick={handleQuickSearch} className="btn btn-primary glow-cta">
+              Browse tenders
+            </button>
+            <button
+              onClick={() => alert("Hook this to Lex / OpenAI modal")}
+              className="btn btn-outline ts"
+            >
+              Try AI summary
+            </button>
           </div>
         </div>
-        <img
-          src="/techsphere-logo.png"
-          alt="Techsphere Solutions"
-          className="h-24 w-24 md:h-32 md:w-32"
-        />
+
+        {/* hero metric box – now real total */}
+        <div className="hero-metric-box">
+          <p className="hero-metric-title">Live public tenders</p>
+          <p className="hero-metric-value">{latestTotal}</p>
+          <p className="hero-metric-sub">
+            Fetched from official publishers <br /> “View, filter and share from one interface.”
+          </p>
+          <p className="hero-metric-foot">Showing {latest.length || 0} on this page</p>
+        </div>
       </div>
 
-      {/* Value props */}
-      <div className="grid md:grid-cols-3 gap-6">
-        <FeatureCard
-          title="Multi-Source Coverage"
-          desc="eTenders, Eskom, SANRAL and Transnet in one place, with consistent fields for searching and sorting."
-          tag="Sources"
+      {/* QUICK SEARCH BAR */}
+      <form
+        onSubmit={handleQuickSearch}
+        className="glass-panel search-bar"
+        style={{ "--panel-bg": 0.04 }}
+      >
+        <input
+          className="input flex-1"
+          placeholder="Search title, buyer or description…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
         />
-        <FeatureCard
-          title="Smart Filters"
-          desc="Search by free text, buyer, source, status and date windows; sort by closing or published dates."
-          tag="Filtering"
+        <select
+          className="select md:w-52 dark-select"
+          value={source}
+          onChange={(e) => setSource(e.target.value)}
+        >
+          <option value="">All publishers</option>
+          {sources.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+        </select>
+        <input
+          type="date"
+          className="input md:w-44 dark-date"
+          value={closingBefore}
+          onChange={(e) => setClosingBefore(e.target.value)}
         />
-        <FeatureCard
-          title="Instant Details"
-          desc="Open any tender to view documents and contact information neatly organized into cards."
-          tag="Details"
-        />
-      </div>
+        <button type="submit" className="btn btn-primary glow-cta md:w-auto">
+          Search
+        </button>
+      </form>
 
-      {/* Explainer */}
-      <div className="glass-panel p-6">
-        <h2 className="text-xl md:text-2xl font-semibold">Why TenderTool?</h2>
-        <p className="mt-2 opacity-90">
-          Government and state-owned entities publish tenders on different websites with different
-          structures, which makes discovery and analysis hard. TenderTool centralizes that process
-          and surfaces insights so suppliers can respond quickly and teams make better bid/no-bid
-          decisions.
-        </p>
-      </div>
+      {/* SEARCH RESULTS (on home) */}
+      {searchRan && (
+        <section className="space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="h2-pro">{searchTitle}</h2>
+          </div>
+          {searchLoading ? (
+            <p className="text-slate-200/70">Searching…</p>
+          ) : searchResults.length === 0 ? (
+            <p className="text-slate-200/70">No tenders matched that search.</p>
+          ) : (
+            <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-5">
+              {searchResults.map((t) => (
+                <PremiumTenderCard
+                  key={t.id ?? t.referenceNumber}
+                  tender={t}
+                  isLoggedIn={auth.isAuthenticated}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
-      {/* 📊 Dashboard Section */}
-      <div className="glass-panel p-8 rounded-xl mt-10 space-y-8">
-        <h2 className="text-2xl font-semibold text-slate-100">
-          Tender Statistics Overview
-        </h2>
-
-        {loading ? (
-          <p className="text-gray-400 text-lg">Loading dashboard...</p>
-        ) : error ? (
-          <p className="text-red-400">Error: {error}</p>
+      {/* LATEST TENDERS */}
+      <section className="space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="h2-pro">Latest opportunities</h2>
+          {!searchRan && (
+            <Link
+              to="/tenders"
+              className="text-sm text-cyan-200 hover:text-white transition underline-offset-2 hover:underline"
+            >
+              View all tenders →
+            </Link>
+          )}
+        </div>
+        {loadingLatest ? (
+          <p className="text-slate-300/70">Loading latest tenders…</p>
+        ) : latest.length === 0 ? (
+          <p className="text-slate-300/70">No tenders available right now.</p>
         ) : (
-          <>
-            {/* Summary Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <StatCard title="Total Tenders" value={total} color="indigo" />
-              <StatCard title="Open Tenders" value={openTenders} color="green" />
-              <StatCard title="Closing Soon" value={closingSoon} color="yellow" />
-            </div>
+          <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-5">
+            {latest.map((t) => (
+              <PremiumTenderCard
+                key={t.id ?? t.referenceNumber}
+                tender={t}
+                isLoggedIn={auth.isAuthenticated}
+              />
+            ))}
+          </div>
+        )}
+      </section>
 
-            {/* Charts Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              {/* Published Status (Bar) */}
-              <ChartPanel title="Tenders by Published Status">
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart
-                    data={[
-                      { name: "Open", value: openTenders },
-                      { name: "Closing Soon", value: closingSoon },
-                    ]}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="name" />
-                    <YAxis />
-                    <Tooltip />
-                    <Legend />
-                    <Bar dataKey="value" fill="#4F46E5" radius={[5, 5, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </ChartPanel>
+      {/* BROWSE BY PUBLISHER – stays on home now */}
+      <section className="space-y-4">
+        <h2 className="h2-pro">Browse by publisher</h2>
+        <p className="text-slate-200/75 max-w-2xl">
+          Jump straight to the organisation you work with most often.
+        </p>
+        <div className="grid md:grid-cols-4 gap-4">
+          {sources.map((s) => (
+            <button
+              key={s.id}
+              onClick={() => handlePublisherClick(s.id)}
+              className="glass-panel p-4 text-left hover:border-cyan-400/75 transition"
+              style={{ "--panel-bg": 0.04 }}
+            >
+              <div className="text-xs uppercase tracking-wide text-slate-200/80">Publisher</div>
+              <div className="mt-1 text-lg font-semibold text-slate-50">{s.name}</div>
+              <div className="mt-2 text-xs text-cyan-100/70">Show on this page →</div>
+            </button>
+          ))}
+        </div>
+      </section>
 
-              {/* Category (Pie) with Custom Legend */}
-              <ChartPanel title="Tenders by Category">
-                <div className="flex flex-col lg:flex-row gap-4">
-                  <div className="flex-1">
-                    <ResponsiveContainer width="100%" height={300}>
-                      <PieChart>
-                        <Pie
-                          data={tendersByCategory}
-                          dataKey="value"
-                          nameKey="name"
-                          outerRadius={100}
-                          label
-                        >
-                          {tendersByCategory.map((entry) => (
-                            <Cell 
-                              key={entry.name} 
-                              fill={getCategoryColor(entry.name)} 
-                            />
-                          ))}
-                        </Pie>
-                        <Tooltip />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
-                  
-                  {/* Custom Interactive Legend */}
-                  <div className="lg:w-48 space-y-2">
-                    {allTendersByCategory.map((item) => (
-                      <button
-                        key={item.name}
-                        onClick={() => toggleCategory(item.name)}
-                        className={`w-full flex items-center gap-2 p-2 rounded transition-all text-left ${
-                          selectedCategories.has(item.name)
-                            ? 'bg-white/10 opacity-100'
-                            : 'bg-white/5 opacity-40'
-                        } hover:bg-white/15`}
-                      >
-                        <div
-                          className="w-3 h-3 rounded-full flex-shrink-0"
-                          style={{ backgroundColor: getCategoryColor(item.name) }}
-                        />
-                        <span className="text-xs text-slate-100 flex-1">
-                          {item.name}
-                        </span>
-                        <span className="text-xs text-slate-300 font-semibold">
-                          {item.value}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </ChartPanel>
+      {/* POPULAR CATEGORIES */}
+      <section className="space-y-3">
+        <h2 className="h2-pro">Popular categories</h2>
+        <p className="text-slate-200/75 max-w-2xl">
+          Explore common sectors suppliers bid for.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {[
+            "Construction & Roads",
+            "Energy & Power",
+            "ICT & Software",
+            "Cleaning & Facilities",
+            "Professional Services",
+            "Security",
+          ].map((cat) => (
+            <button
+              key={cat}
+              onClick={() => handleCategoryClick(cat)}
+              className="chip bg-white/5 border border-white/10 hover:bg-cyan-400/10 hover:border-cyan-400/30 transition"
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
+      </section>
 
-              {/* Buyer (Pie) with Custom Legend */}
-              <ChartPanel title="Tenders by Buyer">
-                <div className="flex flex-col lg:flex-row gap-4">
-                  <div className="flex-1">
-                    <ResponsiveContainer width="100%" height={300}>
-                      <PieChart>
-                        <Pie
-                          data={tendersByBuyer}
-                          dataKey="value"
-                          nameKey="name"
-                          outerRadius={100}
-                          label
-                        >
-                          {tendersByBuyer.map((entry) => (
-                            <Cell 
-                              key={entry.name} 
-                              fill={getBuyerColor(entry.name)} 
-                            />
-                          ))}
-                        </Pie>
-                        <Tooltip />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
-                  
-                  {/* Custom Interactive Legend */}
-                  <div className="lg:w-48 space-y-2">
-                    {allTendersByBuyer.map((item) => (
-                      <button
-                        key={item.name}
-                        onClick={() => toggleBuyer(item.name)}
-                        className={`w-full flex items-center gap-2 p-2 rounded transition-all text-left ${
-                          selectedBuyers.has(item.name)
-                            ? 'bg-white/10 opacity-100'
-                            : 'bg-white/5 opacity-40'
-                        } hover:bg-white/15`}
-                      >
-                        <div
-                          className="w-3 h-3 rounded-full flex-shrink-0"
-                          style={{ backgroundColor: getBuyerColor(item.name) }}
-                        />
-                        <span className="text-xs text-slate-100 flex-1">
-                          {item.name}
-                        </span>
-                        <span className="text-xs text-slate-300 font-semibold">
-                          {item.value}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </ChartPanel>
+      {/* WHY PEOPLE USE TENDERTOOL – your “info cards” */}
+<section
+  className="glass-panel p-6 md:p-7 space-y-4"
+  style={{ "--panel-bg": 0.025 }}
+>
+  <div>
+    <h2 className="h2-pro">Why businesses use TenderTool</h2>
+    <p className="text-slate-200/75 max-w-2xl mt-1">
+      We centralise, make it searchable, and give you tools to act fast.
+    </p>
+  </div>
 
-              {/* Location (Pie) - No Legend */}
-              <ChartPanel title="Tenders by Location">
-                <ResponsiveContainer width="100%" height={300}>
-                  <PieChart>
-                    <Pie
-                      data={tendersByLocation}
-                      dataKey="value"
-                      nameKey="name"
-                      outerRadius={100}
-                      label
-                    >
-                      {tendersByLocation.map((_, i) => (
-                        <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip />
-                  </PieChart>
-                </ResponsiveContainer>
-              </ChartPanel>
-            </div>
-          </>
+  <div className="grid md:grid-cols-4 gap-5">
+    <BenefitCard
+      icon="📄"
+      title="All in one place"
+      desc="Public tenders from key SA publishers in a unified view."
+    />
+    <BenefitCard
+      icon="⚡"
+      title="Fast filtering"
+      desc="Filter by source, date and sector in seconds."
+    />
+    <BenefitCard
+      icon="🤖"
+      title="AI-friendly"
+      desc="Send the long notice to AI to summarise or extract requirements."
+    />
+    <BenefitCard
+      icon="🔔"
+      title="Ready for alerts"
+      desc="Designed to plug into SNS / email / WhatsApp style alerts."
+    />
+  </div>
+</section>
+
+
+      {/* HOW IT WORKS */}
+      <section className="grid md:grid-cols-3 gap-5">
+        <InfoCard
+          title="1. We collect public tenders"
+          desc="From major South African publishers so you don’t have to open 4 different portals."
+        />
+        <InfoCard
+          title="2. We make them searchable"
+          desc="Unified fields: buyer, source, sector, location, deadlines."
+        />
+        <InfoCard
+          title="3. You find and act"
+          desc="Filter, view details, open the official link, and (soon) set alerts."
+        />
+      </section>
+
+      {/* FAQ */}
+      <section className="glass-panel p-6 space-y-4" style={{ "--panel-bg": 0.03 }}>
+        <h2 className="text-xl md:text-2xl font-semibold">FAQs</h2>
+        <FAQ
+          q="Do I apply on this website?"
+          a="No — we show you the tender details and link you to the official publisher to submit."
+        />
+        <FAQ
+          q="How often is the data updated?"
+          a="Daily. We fetch new tenders and refresh closing dates from the original sources."
+        />
+        <FAQ
+          q="Can I get alerts for certain sectors?"
+          a="Yes — once login is enabled, you’ll be able to save your filters and receive notifications."
+        />
+        <FAQ
+          q="Is this only for government tenders?"
+          a="Right now it focuses on South African public-sector / SOE opportunities."
+        />
+      </section>
+
+      {/* CTA FOR SNS / SIGNUP */}
+      <section className="cta-panel">
+        <div>
+          <h3 className="text-2xl font-bold text-slate-50">Ready to get notified?</h3>
+          <p className="text-slate-100/80 mt-1">
+            Connect your profile and we’ll send alerts for new tenders in your sector.
+          </p>
+        </div>
+        <button className="btn btn-primary glow-cta">Connect alerts</button>
+      </section>
+
+      {/* FOOTER */}
+      <footer className="py-6 text-xs text-slate-400 text-center">
+        TenderTool • Built on AWS • IIE Varsity College WIL
+      </footer>
+    </div>
+  );
+}
+
+/* ------------------------------------------------
+   PREMIUM TENDER CARD (clean v2)
+   ------------------------------------------------ */
+function PremiumTenderCard({ tender, isLoggedIn }) {
+  const [saved, setSaved] = React.useState(false);
+
+  // ---------- normalize ----------
+  const title = tender.title || "Untitled tender";
+
+  const categoryRaw = tender.category;
+  const category =
+    categoryRaw && isMeaningful(categoryRaw)
+      ? categoryRaw.charAt(0).toUpperCase() + categoryRaw.slice(1).toLowerCase()
+      : null;
+
+  // publisher / source from your scrapers
+  const sourceRaw = tender.source || tender.publisher || tender.buyer || null;
+  const sourceName = sourceRaw && isMeaningful(sourceRaw) ? sourceRaw : null;
+
+  const buyer = tender.buyer && isMeaningful(tender.buyer) ? tender.buyer : null;
+  const location = tender.location && isMeaningful(tender.location) ? tender.location : null;
+
+  const published = tender.published_at ? new Date(tender.published_at) : null;
+  const closing = tender.closing_at ? new Date(tender.closing_at) : null;
+
+  // ---------- micro badge (NEW / Updated) ----------
+  let badge = null;
+  if (published) {
+    const now = new Date();
+    const diffHours = (now - published) / (1000 * 60 * 60);
+    if (diffHours <= 24) {
+      badge = "NEW";
+    } else if (diffHours <= 72) {
+      badge = "Updated";
+    }
+  }
+
+  // ---------- status chip (Open / Closing …) ----------
+  const statusInfo = buildStatusFromClosing(closing);
+
+  // ---------- save handler ----------
+  const handleSave = () => {
+    if (!isLoggedIn) {
+      alert("Login to save this tender.");
+      return;
+    }
+    const key = "tt_saved_ids";
+    const prev = JSON.parse(localStorage.getItem(key) || "[]");
+    const id = tender.id ?? tender.referenceNumber;
+    let next;
+    if (prev.includes(id)) {
+      next = prev.filter((x) => x !== id);
+      setSaved(false);
+    } else {
+      next = [...prev, id];
+      setSaved(true);
+    }
+    localStorage.setItem(key, JSON.stringify(next));
+  };
+
+  // mark already saved
+  React.useEffect(() => {
+    const key = "tt_saved_ids";
+    const prev = JSON.parse(localStorage.getItem(key) || "[]");
+    const id = tender.id ?? tender.referenceNumber;
+    if (prev.includes(id)) setSaved(true);
+  }, [tender.id, tender.referenceNumber]);
+
+  // short subline under title
+  const subline = buildSubline({ buyer, location });
+
+  return (
+    <article className="tt-card">
+      {/* top row: chips + star */}
+      <div className="tt-card-top">
+        <div className="flex gap-2 flex-wrap">
+          {category && <span className="tt-chip tt-chip-blue">{category}</span>}
+
+          {sourceName && <span className="tt-chip tt-chip-cyan">{sourceName}</span>}
+
+          {/* status (always show “Open” if nothing else) */}
+          {statusInfo && statusInfo.label ? (
+            <span className={`tt-chip ${statusInfo.className}`}>{statusInfo.label}</span>
+          ) : (
+            <span className="tt-chip tt-chip-soft">Open</span>
+          )}
+        </div>
+
+        <div className="flex flex-col items-end gap-1">
+          <button
+            onClick={handleSave}
+            className={`tt-save-btn ${saved ? "is-saved" : ""}`}
+            aria-label={saved ? "Unsave tender" : "Save tender"}
+          >
+            <Star size={16} strokeWidth={1.7} />
+          </button>
+          {badge && <span className="tt-micro-badge">{badge}</span>}
+        </div>
+      </div>
+
+      {/* title */}
+      <h3 className="tt-title line-clamp-2">{title}</h3>
+
+      {/* subline */}
+      {subline ? <p className="tt-subline">{subline}</p> : null}
+
+      {/* meta icons row */}
+      <div className="tt-meta-row">
+        {location && (
+          <span className="tt-meta-item">
+            <MapPin size={14} className="tt-meta-icon" />
+            {location}
+          </span>
+        )}
+
+        {published && (
+          <span className="tt-meta-item">
+            <CalendarDays size={14} className="tt-meta-icon" />
+            {published.toLocaleDateString()}
+          </span>
+        )}
+
+        {/* closing only if future */}
+        {closing && isFuture(closing) && (
+          <span className="tt-meta-item">
+            <Clock4 size={14} className="tt-meta-icon" />
+            {humanCountdownRich(closing)}
+          </span>
         )}
       </div>
+
+      {/* bottom: full-width action */}
+      <div className="tt-footer">
+        <button className="tt-view-btn w-full">View details</button>
+      </div>
+    </article>
+  );
+}
+
+/* ------------------------------------------------
+   helper fns used above
+   ------------------------------------------------ */
+function isMeaningful(v) {
+  if (!v) return false;
+  const s = String(v).trim();
+  if (!s) return false;
+  const bad = ["-", "—", "n/a", "na", "null", "none"];
+  return !bad.includes(s.toLowerCase());
+}
+
+// decide status chip
+function buildStatusFromClosing(closingDate) {
+  if (!closingDate) {
+    return { label: "Open", className: "tt-chip-soft" };
+  }
+  if (!isFuture(closingDate)) {
+    // you said: don't show "Closed" on cards
+    return { label: "Open", className: "tt-chip-soft" };
+  }
+
+  const now = new Date();
+  const diffMs = closingDate - now;
+  const diffDays = diffMs / (1000 * 60 * 60 * 24);
+
+  if (diffDays <= 1) {
+    return { label: "Closing today", className: "tt-chip-danger" };
+  }
+  if (diffDays <= 3) {
+    return { label: "Closing in 3 days", className: "tt-chip-warning" };
+  }
+  if (diffDays <= 7) {
+    return { label: "Closing soon", className: "tt-chip-warning" };
+  }
+  return { label: "Open", className: "tt-chip-soft" };
+}
+
+function isFuture(d) {
+  return d.getTime() - Date.now() > 0;
+}
+
+// build one neat line under title
+function buildSubline({ buyer, location }) {
+  if (buyer && location && buyer !== location) return `${buyer} • ${location}`;
+  if (buyer) return buyer;
+  if (location) return location;
+  return "";
+}
+
+// “Closes in 2 months 5 days” / “Closes in 6d” / “Closes in 3h”
+function humanCountdownRich(closingDate) {
+  const now = new Date();
+  const diffMs = closingDate - now;
+  if (diffMs <= 0) return ""; // don't show
+
+  const diffMins = Math.floor(diffMs / (1000 * 60));
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  // longer than 30 days → show months + days
+  if (diffDays > 30) {
+    const months = Math.floor(diffDays / 30);
+    const days = diffDays % 30;
+    if (days > 0) {
+      return `Closes in ${months} mo ${days}d`;
+    }
+    return `Closes in ${months} mo`;
+  }
+
+  if (diffDays > 0) return `Closes in ${diffDays}d`;
+  if (diffHours > 0) return `Closes in ${diffHours}h`;
+  return `Closes in ${diffMins}m`;
+}
+
+
+/* ------------------------------------------------
+   helpers
+   ------------------------------------------------ */
+function computeUrgency(closingDate) {
+  if (!closingDate) return { urgencyLabel: null, urgencyClass: "" };
+  const now = new Date();
+  const diffMs = closingDate - now;
+  if (diffMs < 0) {
+    return { urgencyLabel: null, urgencyClass: "" };
+  }
+  const diffDays = diffMs / (1000 * 60 * 60 * 24);
+
+  if (diffDays <= 1) {
+    return { urgencyLabel: "Closing today", urgencyClass: "tt-chip-danger" };
+  }
+  if (diffDays <= 3) {
+    return { urgencyLabel: "Closing in 3 days", urgencyClass: "tt-chip-warning" };
+  }
+  if (diffDays <= 7) {
+    return { urgencyLabel: "Closing soon", urgencyClass: "tt-chip-soft" };
+  }
+  return { urgencyLabel: null, urgencyClass: "" };
+}
+
+function humanCountdown(closingDate) {
+  const now = new Date();
+  const diffMs = closingDate - now;
+  if (diffMs <= 0) return "Closed";
+  const diffMins = Math.floor(diffMs / (1000 * 60));
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffDays > 0) return `Closes in ${diffDays}d`;
+  if (diffHours > 0) return `Closes in ${diffHours}h`;
+  return `Closes in ${diffMins}m`;
+}
+
+/* ----------------- small components ----------------- */
+
+function InfoCard({ title, desc }) {
+  return (
+    <div className="glass-panel p-5" style={{ "--panel-bg": 0.04 }}>
+      <h3 className="text-lg font-semibold text-slate-50">{title}</h3>
+      <p className="mt-2 text-slate-300 text-sm">{desc}</p>
     </div>
   );
 }
 
-function FeatureCard({ title, desc, tag }) {
-  const tagClass =
-    tag === "Sources"
-      ? "chip chip-cyan"
-      : tag === "Filtering"
-      ? "chip chip-blue"
-      : tag === "Details"
-      ? "chip chip-magenta"
-      : "chip chip-violet";
-
+function BenefitCard({ icon, title, desc }) {
   return (
-    <div
-      className="glass-panel p-5"
-      style={{ "--panel-bg": 0.11, "--panel-ol": 0.52, "--panel-thickness": "2px" }}
-    >
-      <div className={tagClass}>{tag}</div>
-      <h3 className="text-lg md:text-xl font-semibold text-slate-100 mt-2">
-        {title}
-      </h3>
-      <p className="mt-1 text-slate-300">{desc}</p>
+    <div className="benefit-card">
+      <div className="benefit-icon">{icon}</div>
+      <h3 className="benefit-title">{title}</h3>
+      <p className="benefit-desc">{desc}</p>
     </div>
   );
 }
 
-function StatCard({ title, value, color }) {
-  const colorMap = {
-    indigo: "bg-indigo-100 text-indigo-900",
-    green: "bg-green-100 text-green-900",
-    yellow: "bg-yellow-100 text-yellow-900",
-  };
+function FAQ({ q, a }) {
   return (
-    <div className={`rounded-xl shadow p-6 text-center ${colorMap[color]}`}>
-      <h2 className="text-lg font-semibold">{title}</h2>
-      <p className="text-3xl font-bold">{value}</p>
-    </div>
-  );
-}
-
-function ChartPanel({ title, children }) {
-  return (
-    <div className="bg-white/10 backdrop-blur-lg border border-white/20 rounded-2xl p-6 shadow-lg">
-      <h3 className="text-lg font-semibold mb-4 text-slate-100">{title}</h3>
-      {children}
-    </div>
+    <details className="faq-item">
+      <summary className="faq-summary">{q}</summary>
+      <p className="faq-answer">{a}</p>
+    </details>
   );
 }
