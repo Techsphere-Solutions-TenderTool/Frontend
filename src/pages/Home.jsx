@@ -1,11 +1,11 @@
 // src/pages/Home.jsx
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useContext } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "react-oidc-context";
 import { listTenders } from "../lib/api";
+import { MapPin, CalendarDays, Clock4, Star } from "lucide-react";
+import { PrefsContext } from "../App.jsx";;
 
-// icons
-import { MapPin, CalendarDays, Clock4, ExternalLink, Star } from "lucide-react";
 
 export default function Home() {
   const auth = useAuth();
@@ -420,8 +420,16 @@ export default function Home() {
 /* ------------------------------------------------
    PREMIUM TENDER CARD (clean v2)
    ------------------------------------------------ */
-function PremiumTenderCard({ tender, isLoggedIn }) {
-  const [saved, setSaved] = React.useState(false);
+function PremiumTenderCard({ tender }) {
+  const auth = useAuth();
+  const ctx = useContext(PrefsContext);
+  const canSave = ctx?.canSave;
+  const savedIds = ctx?.savedTenders || [];
+  const addSaved = ctx?.addSavedTender;
+  const removeSaved = ctx?.removeSavedTender;
+
+  const id = tender.id ?? tender.referenceNumber;
+  const isSaved = savedIds.includes(id);
 
   // ---------- normalize ----------
   const title = tender.title || "Untitled tender";
@@ -433,7 +441,7 @@ function PremiumTenderCard({ tender, isLoggedIn }) {
       : null;
 
   // publisher / source from your scrapers
-  const sourceRaw = tender.source || tender.publisher || tender.buyer || null;
+ const sourceRaw = tender.source || tender.publisher || tender.buyer || null;
   const sourceName = sourceRaw && isMeaningful(sourceRaw) ? sourceRaw : null;
 
   const buyer = tender.buyer && isMeaningful(tender.buyer) ? tender.buyer : null;
@@ -441,6 +449,8 @@ function PremiumTenderCard({ tender, isLoggedIn }) {
 
   const published = tender.published_at ? new Date(tender.published_at) : null;
   const closing = tender.closing_at ? new Date(tender.closing_at) : null;
+
+  
 
   // ---------- micro badge (NEW / Updated) ----------
   let badge = null;
@@ -458,72 +468,47 @@ function PremiumTenderCard({ tender, isLoggedIn }) {
   const statusInfo = buildStatusFromClosing(closing);
 
   // ---------- save handler ----------
-  const handleSave = () => {
-    if (!isLoggedIn) {
+ const handleSave = () => {
+    if (!canSave) {
       alert("Login to save this tender.");
       return;
     }
-    const key = "tt_saved_ids";
-    const prev = JSON.parse(localStorage.getItem(key) || "[]");
-    const id = tender.id ?? tender.referenceNumber;
-    let next;
-    if (prev.includes(id)) {
-      next = prev.filter((x) => x !== id);
-      setSaved(false);
+    if (isSaved) {
+      removeSaved?.(id);
     } else {
-      next = [...prev, id];
-      setSaved(true);
+      addSaved?.(id);
     }
-    localStorage.setItem(key, JSON.stringify(next));
   };
+  
 
-  // mark already saved
-  React.useEffect(() => {
-    const key = "tt_saved_ids";
-    const prev = JSON.parse(localStorage.getItem(key) || "[]");
-    const id = tender.id ?? tender.referenceNumber;
-    if (prev.includes(id)) setSaved(true);
-  }, [tender.id, tender.referenceNumber]);
-
-  // short subline under title
-  const subline = buildSubline({ buyer, location });
 
   return (
     <article className="tt-card">
-      {/* top row: chips + star */}
       <div className="tt-card-top">
         <div className="flex gap-2 flex-wrap">
           {category && <span className="tt-chip tt-chip-blue">{category}</span>}
-
           {sourceName && <span className="tt-chip tt-chip-cyan">{sourceName}</span>}
-
-          {/* status (always show “Open” if nothing else) */}
-          {statusInfo && statusInfo.label ? (
-            <span className={`tt-chip ${statusInfo.className}`}>{statusInfo.label}</span>
-          ) : (
-            <span className="tt-chip tt-chip-soft">Open</span>
-          )}
+          {statusInfo && <span className={`tt-chip ${statusInfo.className}`}>{statusInfo.label}</span>}
         </div>
-
-        <div className="flex flex-col items-end gap-1">
-          <button
-            onClick={handleSave}
-            className={`tt-save-btn ${saved ? "is-saved" : ""}`}
-            aria-label={saved ? "Unsave tender" : "Save tender"}
-          >
-            <Star size={16} strokeWidth={1.7} />
-          </button>
-          {badge && <span className="tt-micro-badge">{badge}</span>}
-        </div>
+        <button
+          onClick={handleSave}
+          className={`tt-save-btn ${isSaved ? "is-saved" : ""}`}
+          aria-label={isSaved ? "Unsave tender" : "Save tender"}
+        >
+          <Star size={16} strokeWidth={1.7} />
+        </button>
       </div>
 
-      {/* title */}
       <h3 className="tt-title line-clamp-2">{title}</h3>
 
-      {/* subline */}
-      {subline ? <p className="tt-subline">{subline}</p> : null}
+      {buyer || location ? (
+        <p className="tt-subline">
+          {buyer ? buyer : ""}
+          {buyer && location ? " • " : ""}
+          {location ? location : ""}
+        </p>
+      ) : null}
 
-      {/* meta icons row */}
       <div className="tt-meta-row">
         {location && (
           <span className="tt-meta-item">
@@ -531,15 +516,12 @@ function PremiumTenderCard({ tender, isLoggedIn }) {
             {location}
           </span>
         )}
-
         {published && (
           <span className="tt-meta-item">
             <CalendarDays size={14} className="tt-meta-icon" />
             {published.toLocaleDateString()}
           </span>
         )}
-
-        {/* closing only if future */}
         {closing && isFuture(closing) && (
           <span className="tt-meta-item">
             <Clock4 size={14} className="tt-meta-icon" />
@@ -548,7 +530,6 @@ function PremiumTenderCard({ tender, isLoggedIn }) {
         )}
       </div>
 
-      {/* bottom: full-width action */}
       <div className="tt-footer">
         <button className="tt-view-btn w-full">View details</button>
       </div>
