@@ -9,16 +9,18 @@ export default function UserPrefsSheet({ onClose }) {
   // Hooks must always be called – even if context is missing.
   const ctx = useContext(PrefsContext);
 
-  // Form state + ui state (declared unconditionally at top)
-  const [form, setForm] = useState(
-    ctx?.prefs ?? { name: "", location: "", notifications: "none", categories: [] }
-  );
-  const [saving, setSaving] = useState(false);
-  const [successMsg, setSuccessMsg] = useState("");
-  const [errorMsg, setErrorMsg] = useState("");
+const [form, setForm] = useState({ 
+  name: "", 
+  location: "", 
+  notifications: "none", 
+  categories: [] 
+});
+const [saving, setSaving] = useState(false);
+const [successMsg, setSuccessMsg] = useState("");
+const [errorMsg, setErrorMsg] = useState("");
 
-  // If context wasn’t provided, render nothing (hooks above already executed)
-  if (!ctx) return null;
+//   check context (after all hooks)
+if (!ctx) return null;
 
   const { prefs, setPrefs, savedTenders } = ctx;
 

@@ -1,4 +1,5 @@
 // src/pages/Stats.jsx
+import { getStats } from "../lib/api";
 import React, { useEffect, useState, useMemo } from "react";
 import {
   PieChart,

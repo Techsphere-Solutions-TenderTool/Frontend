@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { useAuth } from "react-oidc-context";
 
+import ToastProvider, { useToast } from "./components/ToastProvider.jsx";
 import Navbar from "./components/Navbar.jsx";
 import UserPrefsSheet from "./components/UserPrefsSheet.jsx";
 import TenderDetailsPage from "./routes/TenderDetailsPage.jsx";
@@ -10,13 +11,14 @@ import Home from "./pages/Home.jsx";
 import TendersPage from "./routes/TendersPage.jsx";
 import About from "./pages/About.jsx";
 import Contact from "./pages/Contact.jsx";
+import ChatWidget from "./components/ChatWidget.jsx";   // ✅ add this import
 
-// ⬅️ context is now in its own file (fixes react-refresh rule)
+// Context
 import { PrefsContext } from "./contexts/PrefsContext.js";
 
-export default function App() {
+function AppInner() {
   const auth = useAuth();
-
+  const toast = useToast();
   const [showPrefs, setShowPrefs] = useState(false);
 
   const [prefs, setPrefs] = useState({
@@ -25,7 +27,6 @@ export default function App() {
     notifications: "none",
     categories: [],
   });
-
   const [savedTenders, setSavedTenders] = useState([]);
 
   const email = auth.user?.profile?.email ?? "user";
@@ -34,64 +35,42 @@ export default function App() {
   const storageKey = auth.isAuthenticated ? `tt_prefs_${email}` : null;
   const savedKey = auth.isAuthenticated ? `tt_saved_${email}` : null;
 
-  // Load prefs & saved tenders (localStorage first, then backend)
+  useEffect(() => {
+    if (import.meta.env.MODE !== "production") toast.info("Toast system ready.");
+  }, [toast]);
+
   useEffect(() => {
     if (!auth.isAuthenticated) {
-      setPrefs({
-        name: "",
-        location: "",
-        notifications: "none",
-        categories: [],
-      });
+      setPrefs({ name: "", location: "", notifications: "none", categories: [] });
       setSavedTenders([]);
       return;
     }
 
-    // localStorage → prefs
     if (storageKey) {
       const raw = localStorage.getItem(storageKey);
       if (raw) {
+        try { setPrefs((p) => ({ ...p, ...JSON.parse(raw) })); } catch {}
+      }
+    }
+    if (savedKey) {
+      const raw = localStorage.getItem(savedKey);
+      if (raw) {
         try {
           const parsed = JSON.parse(raw);
-          setPrefs((prev) => ({ ...prev, ...parsed }));
-        } catch (err) {
-          console.warn("Failed to parse local prefs", err);
-        }
-      }
-    }
-
-    // localStorage → saved tenders
-    if (savedKey) {
-      const rawSaved = localStorage.getItem(savedKey);
-      if (rawSaved) {
-        try {
-          const parsed = JSON.parse(rawSaved);
           if (Array.isArray(parsed)) setSavedTenders(parsed);
-        } catch (err) {
-          console.warn("Failed to parse saved tenders", err);
-        }
+        } catch {}
       }
     }
 
-    // backend → prefs
-    async function loadBackendPrefs() {
+    (async () => {
       try {
+        const base = import.meta.env.VITE_TENDER_API_URL || import.meta.env.VITE_API_BASE_URL || "";
+        if (!base) return;
         const res = await fetch(
-          `${import.meta.env.VITE_TENDER_API_URL}/user/preferences?email=${email}`,
-          {
-            headers: {
-              Authorization: accessToken ? `Bearer ${accessToken}` : "",
-            },
-          }
+          `${base.replace(/\/+$/, "")}/user/preferences?email=${encodeURIComponent(email)}`,
+          { headers: { Authorization: accessToken ? `Bearer ${accessToken}` : "" } }
         );
-
-        // tolerate non-200s
-        if (!res.ok) {
-          // optional soft warning; not a failure
-          console.warn("Backend prefs request not OK:", res.status);
-          return;
-        }
-
+        if (!res.ok) return;
         const data = await res.json();
         if (data) {
           setPrefs((prev) => ({
@@ -100,39 +79,19 @@ export default function App() {
             categories: data.categories || [],
           }));
         }
-      } catch (err) {
-        console.error("Failed to load backend prefs", err);
-      }
-    }
+      } catch {}
+    })();
+  }, [auth.isAuthenticated, storageKey, savedKey, email, accessToken]);
 
-    loadBackendPrefs();
-  }, [
-    auth.isAuthenticated,
-    storageKey,
-    savedKey,
-    email,         // include used values in deps
-    accessToken,   // include used values in deps
-  ]);
-
-  // Persist prefs to localStorage
   useEffect(() => {
     if (auth.isAuthenticated && storageKey) {
-      try {
-        localStorage.setItem(storageKey, JSON.stringify(prefs));
-      } catch (err) {
-        console.error("Failed to persist prefs", err);
-      }
+      try { localStorage.setItem(storageKey, JSON.stringify(prefs)); } catch {}
     }
   }, [prefs, auth.isAuthenticated, storageKey]);
 
-  // Persist saved tenders to localStorage
   useEffect(() => {
     if (auth.isAuthenticated && savedKey) {
-      try {
-        localStorage.setItem(savedKey, JSON.stringify(savedTenders));
-      } catch (err) {
-        console.error("Failed to persist saved tenders", err);
-      }
+      try { localStorage.setItem(savedKey, JSON.stringify(savedTenders)); } catch {}
     }
   }, [savedTenders, auth.isAuthenticated, savedKey]);
 
@@ -146,14 +105,12 @@ export default function App() {
         if (!id) return;
         setSavedTenders((cur) => (cur.includes(id) ? cur : [...cur, id]));
       },
-      removeSavedTender: (id) => {
-        if (!id) return;
-        setSavedTenders((cur) => cur.filter((x) => x !== id));
-      },
+      removeSavedTender: (id) => setSavedTenders((cur) => cur.filter((x) => x !== id)),
       canSave: auth.isAuthenticated,
       openPrefs: () => setShowPrefs(true),
+      notifyLoginNeeded: () => toast.warn("Login to add favourites."),
     }),
-    [prefs, savedTenders, auth.isAuthenticated]
+    [prefs, savedTenders, auth.isAuthenticated, toast]
   );
 
   if (auth.isLoading) {
@@ -192,7 +149,18 @@ export default function App() {
         </div>
 
         {showPrefs && <UserPrefsSheet onClose={() => setShowPrefs(false)} />}
+
+        {/* ✅ Global floating widget: appears on every route, stays fixed on scroll */}
+        <ChatWidget />
       </BrowserRouter>
     </PrefsContext.Provider>
+  );
+}
+
+export default function App() {
+  return (
+    <ToastProvider>
+      <AppInner />
+    </ToastProvider>
   );
 }

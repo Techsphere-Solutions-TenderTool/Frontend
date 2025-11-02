@@ -2,39 +2,64 @@
 import React, { useEffect, useState, useCallback, useContext } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "react-oidc-context";
-import { listTenders } from "../lib/api";
-import { MapPin, CalendarDays, Clock4, Star } from "lucide-react";
-import { PrefsContext } from "../contexts/PrefsContext.js";
+import { MapPin, CalendarDays, Clock4, Star, ExternalLink } from "lucide-react";
 
+import { listTenders, cacheTender } from "../lib/api";
+import { PrefsContext } from "../contexts/PrefsContext.js";
+import { textToSpeech } from "../lib/polly";
+import { useToast } from "../components/ToastProvider.jsx";
+import {
+  isMeaningful,
+  buildStatusFromClosing,
+  buildBadge,
+  isFuture,
+  humanCountdown,
+  parseDate,
+  prettySource,
+} from "../lib/tenderUtils";
 
 export default function Home() {
   const auth = useAuth();
+  const toast = useToast();
 
-  // for hero + “latest opportunities”
+  // Data
   const [latest, setLatest] = useState([]);
   const [latestTotal, setLatestTotal] = useState(0);
-  const [sources, setSources] = useState([
-    { id: "eskom", name: "Eskom Tender Bulletin" },
+  const [sources] = useState([
+    { id: "eskom", name: "ESKOM" },
     { id: "sanral", name: "SANRAL" },
     { id: "transnet", name: "Transnet" },
     { id: "etenders", name: "National eTenders" },
   ]);
   const [loadingLatest, setLoadingLatest] = useState(true);
 
-  // quick search form
+  // Quick search form
   const [q, setQ] = useState("");
   const [source, setSource] = useState("");
   const [closingBefore, setClosingBefore] = useState("");
 
-  // show results on the **home** page
+  // Search results displayed on home page
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchRan, setSearchRan] = useState(false);
   const [searchTitle, setSearchTitle] = useState("");
 
-  // ----------------------------
-  // search helper
-  // ----------------------------
+  // Voice test
+  async function playVoice() {
+    try {
+      const audioBase64 = await textToSpeech(
+        "Welcome to TenderTool, your South African tender assistant."
+      );
+      const audio = new Audio("data:audio/mp3;base64," + audioBase64);
+      await audio.play();
+      toast.info("Playing welcome audio.");
+    } catch (err) {
+      console.error("TTS error:", err);
+      toast.error(err?.message || "Error playing speech");
+    }
+  }
+
+  // Search function
   const runSearch = useCallback(
     async ({
       q: qArg = q,
@@ -43,11 +68,9 @@ export default function Home() {
     } = {}) => {
       setSearchLoading(true);
       setSearchRan(true);
+      
       try {
-        const params = {
-          limit: 9,
-          offset: 0,
-        };
+        const params = { limit: 9, offset: 0 };
         if (qArg) params.q = qArg;
         if (srcArg) params.source = srcArg;
         if (cbArg) params.closing_before = cbArg;
@@ -56,75 +79,60 @@ export default function Home() {
         const items = resp.results ?? resp.items ?? [];
         setSearchResults(items);
 
-        // build title
+        // Build title
         let t = "Search results";
         const bits = [];
-        if (qArg) bits.push(`“${qArg}”`);
-        if (srcArg) bits.push(`publisher: ${srcArg}`);
+        if (qArg) bits.push(`"${qArg}"`);
+        if (srcArg) bits.push(`publisher: ${prettySource(srcArg)}`);
         if (cbArg) bits.push(`closing before: ${cbArg}`);
         if (bits.length) t = `Search: ${bits.join(" • ")}`;
         setSearchTitle(t);
+
+        if (items.length === 0) {
+          toast.info("No tenders matched that search.");
+        }
       } catch (e) {
         console.error(e);
         setSearchResults([]);
         setSearchTitle("No results");
+        toast.error("Search failed. Please try again.");
       } finally {
         setSearchLoading(false);
       }
     },
-    [q, source, closingBefore]
+    [q, source, closingBefore, toast]
   );
 
-  // ----------------------------
-  // initial load
-  // ----------------------------
+  // Initial load
   useEffect(() => {
     let dead = false;
 
-    // 1) latest tenders for “Latest opportunities” + hero count
     (async () => {
       try {
-        const resp = await listTenders({ limit: 6, offset: 0, sort: "-published_at" });
+        const resp = await listTenders({
+          limit: 6,
+          offset: 0,
+          sort: "-published_at",
+        });
         if (dead) return;
+        
         const items = resp.results ?? resp.items ?? [];
         setLatest(items);
         setLatestTotal(resp.total ?? items.length);
       } catch (e) {
         console.error("Failed to load latest tenders", e);
+        if (!dead) toast.error("Could not load latest tenders.");
       } finally {
         if (!dead) setLoadingLatest(false);
-      }
-    })();
-
-    // 2) try fetch /sources from backend (if it exists)
-    (async () => {
-      try {
-        const base = import.meta.env.VITE_API_BASE_URL;
-        if (!base) return;
-        const res = await fetch(`${base}/sources`);
-        if (!res.ok) return;
-        const data = await res.json();
-        if (!dead && Array.isArray(data)) {
-          setSources(
-            data.map((s) => ({
-              id: (s.name || s.id || "").toLowerCase(),
-              name: s.name ?? s.id,
-            }))
-          );
-        }
-      } catch (e) {
-        // ignore, we already have fallback
       }
     })();
 
     return () => {
       dead = true;
     };
-  }, []);
+  }, [toast]);
 
-  // ----------------------------
-  // form submit stays on home
-  // ----------------------------
+  // Form submit
   async function handleQuickSearch(e) {
     e.preventDefault();
     runSearch();
@@ -156,7 +164,7 @@ export default function Home() {
             Updated daily
           </p>
           <h1 className="h1-pro">
-            South Africa’s smartest way to find tenders — from “where do I look?” to “found it” in
+            South Africa's smartest way to find tenders — from "where do I look?" to "found it" in
             minutes.
           </h1>
           <p className="text-slate-100/90 text-lg max-w-xl">
@@ -164,26 +172,30 @@ export default function Home() {
             ones.
           </p>
           <div className="flex flex-wrap gap-3">
-           <Link to="/tenders" className="btn btn-primary glow-cta">
-  Browse tenders
-</Link>
+            <Link to="/tenders" className="btn btn-primary glow-cta">
+              Browse tenders
+            </Link>
             <button
-              onClick={() => alert("Hook this to Lex / OpenAI modal")}
+              type="button"
+              onClick={() => toast.info("Chat feature coming soon!")}
               className="btn btn-outline ts"
             >
               Try our Chatbot
             </button>
+            <button type="button" onClick={playVoice} className="btn btn-outline ts">
+              🔊 Test Voice
+            </button>
           </div>
         </div>
 
-        {/* hero metric box – now real total */}
+        {/* Hero metric box */}
         <div className="hero-metric-box">
           <p className="hero-metric-title">Live public tenders</p>
-          <p className="hero-metric-value">{latestTotal}</p>
+          <p className="hero-metric-value">{latestTotal.toLocaleString()}</p>
           <p className="hero-metric-sub">
-            Fetched from official publishers <br /> “View, filter and share from one interface.”
+            Fetched from official publishers <br /> View, filter and share from one interface.
           </p>
-          <p className="hero-metric-foot">Showing {latest.length || 0} on this page</p>
+          <p className="hero-metric-foot">Showing {latest.length} on this page</p>
         </div>
       </div>
 
@@ -222,20 +234,34 @@ export default function Home() {
         </button>
       </form>
 
-      {/* SEARCH RESULTS (on home) */}
+      {/* SEARCH RESULTS */}
       {searchRan && (
         <section className="space-y-4">
           <div className="flex items-center justify-between gap-3">
             <h2 className="h2-pro">{searchTitle}</h2>
+            <button
+              onClick={() => {
+                setSearchRan(false);
+                setSearchResults([]);
+                setQ("");
+                setSource("");
+                setClosingBefore("");
+              }}
+              className="text-sm text-cyan-200 hover:text-white transition"
+            >
+              Clear search
+            </button>
           </div>
           {searchLoading ? (
             <p className="text-slate-200/70">Searching…</p>
           ) : searchResults.length === 0 ? (
-            <p className="text-slate-200/70">No tenders matched that search.</p>
+            <div className="glass-panel p-8 text-center" style={{ "--panel-bg": 0.03 }}>
+              <p className="text-slate-100/70">No tenders matched that search.</p>
+            </div>
           ) : (
             <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-5">
               {searchResults.map((t) => (
-                <PremiumTenderCard
+                <TenderCard
                   key={t.id ?? t.referenceNumber}
                   tender={t}
                   isLoggedIn={auth.isAuthenticated}
@@ -247,36 +273,39 @@ export default function Home() {
       )}
 
       {/* LATEST TENDERS */}
-      <section className="space-y-4">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="h2-pro">Latest opportunities</h2>
-          {!searchRan && (
+      {!searchRan && (
+        <section className="space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="h2-pro">Latest opportunities</h2>
             <Link
               to="/tenders"
               className="text-sm text-cyan-200 hover:text-white transition underline-offset-2 hover:underline"
             >
               View all tenders →
             </Link>
-          )}
-        </div>
-        {loadingLatest ? (
-          <p className="text-slate-300/70">Loading latest tenders…</p>
-        ) : latest.length === 0 ? (
-          <p className="text-slate-300/70">No tenders available right now.</p>
-        ) : (
-          <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-5">
-            {latest.map((t) => (
-              <PremiumTenderCard
-                key={t.id ?? t.referenceNumber}
-                tender={t}
-                isLoggedIn={auth.isAuthenticated}
-              />
-            ))}
           </div>
-        )}
-      </section>
+          {loadingLatest ? (
+            <div className="text-slate-300/70 py-10 text-center">
+              <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-current border-r-transparent" />
+              <p className="mt-3">Loading latest tenders…</p>
+            </div>
+          ) : latest.length === 0 ? (
+            <p className="text-slate-300/70">No tenders available right now.</p>
+          ) : (
+            <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-5">
+              {latest.map((t) => (
+                <TenderCard
+                  key={t.id ?? t.referenceNumber}
+                  tender={t}
+                  isLoggedIn={auth.isAuthenticated}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
-      {/* BROWSE BY PUBLISHER – stays on home now */}
+      {/* BROWSE BY PUBLISHER */}
       <section className="space-y-4">
         <h2 className="h2-pro">Browse by publisher</h2>
         <p className="text-slate-200/75 max-w-2xl">
@@ -289,10 +318,13 @@ export default function Home() {
               onClick={() => handlePublisherClick(s.id)}
               className="glass-panel p-4 text-left hover:border-cyan-400/75 transition"
               style={{ "--panel-bg": 0.04 }}
+              type="button"
             >
               <div className="text-xs uppercase tracking-wide text-slate-200/80">Publisher</div>
               <div className="mt-1 text-lg font-semibold text-slate-50">{s.name}</div>
-              <div className="mt-2 text-xs text-cyan-100/70">Show on this page →</div>
+              <div className="mt-2 text-xs text-cyan-100/70 flex items-center gap-1">
+                Show on this page <ExternalLink size={12} />
+              </div>
             </button>
           ))}
         </div>
@@ -301,9 +333,7 @@ export default function Home() {
       {/* POPULAR CATEGORIES */}
       <section className="space-y-3">
         <h2 className="h2-pro">Popular categories</h2>
-        <p className="text-slate-200/75 max-w-2xl">
-          Explore common sectors suppliers bid for.
-        </p>
+        <p className="text-slate-200/75 max-w-2xl">Explore common sectors suppliers bid for.</p>
         <div className="flex flex-wrap gap-2">
           {[
             "Construction & Roads",
@@ -317,6 +347,7 @@ export default function Home() {
               key={cat}
               onClick={() => handleCategoryClick(cat)}
               className="chip bg-white/5 border border-white/10 hover:bg-cyan-400/10 hover:border-cyan-400/30 transition"
+              type="button"
             >
               {cat}
             </button>
@@ -324,48 +355,44 @@ export default function Home() {
         </div>
       </section>
 
-      {/* WHY PEOPLE USE TENDERTOOL – your “info cards” */}
-<section
-  className="glass-panel p-6 md:p-7 space-y-4"
-  style={{ "--panel-bg": 0.025 }}
->
-  <div>
-    <h2 className="h2-pro">Why businesses use TenderTool</h2>
-    <p className="text-slate-200/75 max-w-2xl mt-1">
-      We centralise, make it searchable, and give you tools to act fast.
-    </p>
-  </div>
+      {/* WHY USE TENDERTOOL */}
+      <section className="glass-panel p-6 md:p-7 space-y-4" style={{ "--panel-bg": 0.025 }}>
+        <div>
+          <h2 className="h2-pro">Why businesses use TenderTool</h2>
+          <p className="text-slate-200/75 max-w-2xl mt-1">
+            We centralise, make it searchable, and give you tools to act fast.
+          </p>
+        </div>
 
-  <div className="grid md:grid-cols-4 gap-5">
-    <BenefitCard
-      icon="📄"
-      title="All in one place"
-      desc="Public tenders from key SA publishers in a unified view."
-    />
-    <BenefitCard
-      icon="⚡"
-      title="Fast filtering"
-      desc="Filter by source, date and sector in seconds."
-    />
-    <BenefitCard
-      icon="🤖"
-      title="AI-friendly"
-      desc="Send the long notice to AI to summarise or extract requirements."
-    />
-    <BenefitCard
-      icon="🔔"
-      title="Ready for alerts"
-      desc="Designed to plug into SNS / email / WhatsApp style alerts."
-    />
-  </div>
-</section>
-
+        <div className="grid md:grid-cols-4 gap-5">
+          <BenefitCard
+            icon="📄"
+            title="All in one place"
+            desc="Public tenders from key SA publishers in a unified view."
+          />
+          <BenefitCard
+            icon="⚡"
+            title="Fast filtering"
+            desc="Filter by source, date and sector in seconds."
+          />
+          <BenefitCard
+            icon="🤖"
+            title="AI-friendly"
+            desc="Send the long notice to AI to summarise or extract requirements."
+          />
+          <BenefitCard
+            icon="🔔"
+            title="Ready for alerts"
+            desc="Designed to plug into SNS / email / WhatsApp style alerts."
+          />
+        </div>
+      </section>
 
       {/* HOW IT WORKS */}
       <section className="grid md:grid-cols-3 gap-5">
         <InfoCard
           title="1. We collect public tenders"
-          desc="From major South African publishers so you don’t have to open 4 different portals."
+          desc="From major South African publishers so you don't have to open 4 different portals."
         />
         <InfoCard
           title="2. We make them searchable"
@@ -390,7 +417,7 @@ export default function Home() {
         />
         <FAQ
           q="Can I get alerts for certain sectors?"
-          a="Yes — once login is enabled, you’ll be able to save your filters and receive notifications."
+          a="Yes — once login is enabled, you'll be able to save your filters and receive notifications."
         />
         <FAQ
           q="Is this only for government tenders?"
@@ -398,30 +425,18 @@ export default function Home() {
         />
       </section>
 
-      {/* CTA FOR SNS / SIGNUP */}
-<section className="cta-panel">
-  <div>
-    <h3 className="text-2xl font-bold text-slate-50">Ready to get notified?</h3>
-    <p className="text-slate-100/80 mt-1">
-      Connect your profile and we’ll send alerts for new tenders in your sector.
-    </p>
-  </div>
-  <button
-    onClick={() => {
-      const COGNITO_DOMAIN =
-        "https://af-south-1a3zhkvtjp.auth.af-south-1.amazoncognito.com";
-      const CLIENT_ID = "6hrvpmrv13cf2tnj3en148i38q";
-      const REDIRECT_URI = "http://localhost:5173/";
-      window.location.href = `${COGNITO_DOMAIN}/signup?client_id=${CLIENT_ID}&response_type=code&scope=email+openid+profile&redirect_uri=${encodeURIComponent(
-        REDIRECT_URI
-      )}`;
-    }}
-    className="btn btn-primary glow-cta"
-  >
-    Connect alerts
-  </button>
-</section>
-
+      {/* CTA */}
+      <section className="cta-panel">
+        <div>
+          <h3 className="text-2xl font-bold text-slate-50">Ready to get notified?</h3>
+          <p className="text-slate-100/80 mt-1">
+            Connect your profile and we'll send alerts for new tenders in your sector.
+          </p>
+        </div>
+        <Link to="/tenders" className="btn btn-primary glow-cta">
+          Browse all tenders
+        </Link>
+      </section>
 
       {/* FOOTER */}
       <footer className="py-6 text-xs text-slate-400 text-center">
@@ -431,21 +446,19 @@ export default function Home() {
   );
 }
 
-/* ------------------------------------------------
-   PREMIUM TENDER CARD (clean v2)
-   ------------------------------------------------ */
-function PremiumTenderCard({ tender }) {
-  const auth = useAuth();
+/* ===================== TENDER CARD (UNIFIED) ===================== */
+function TenderCard({ tender, isLoggedIn }) {
   const ctx = useContext(PrefsContext);
   const canSave = ctx?.canSave;
   const savedIds = ctx?.savedTenders || [];
   const addSaved = ctx?.addSavedTender;
   const removeSaved = ctx?.removeSavedTender;
+  const toast = useToast();
 
   const id = tender.id ?? tender.referenceNumber;
   const isSaved = savedIds.includes(id);
 
-  // ---------- normalize ----------
+  // Normalize
   const title = tender.title || "Untitled tender";
 
   const categoryRaw = tender.category;
@@ -454,75 +467,73 @@ function PremiumTenderCard({ tender }) {
       ? categoryRaw.charAt(0).toUpperCase() + categoryRaw.slice(1).toLowerCase()
       : null;
 
-  // publisher / source from your scrapers
- const sourceRaw = tender.source || tender.publisher || tender.buyer || null;
-  const sourceName = sourceRaw && isMeaningful(sourceRaw) ? sourceRaw : null;
+  const sourceRaw = tender.source || tender.publisher || tender.buyer || null;
+  const sourceName = sourceRaw && isMeaningful(sourceRaw) ? prettySource(sourceRaw) : null;
 
   const buyer = tender.buyer && isMeaningful(tender.buyer) ? tender.buyer : null;
   const location = tender.location && isMeaningful(tender.location) ? tender.location : null;
 
-  const published = tender.published_at ? new Date(tender.published_at) : null;
-  const closing = tender.closing_at ? new Date(tender.closing_at) : null;
+  const published = parseDate(tender.published_at);
+  const closing = parseDate(tender.closing_at);
 
-  
-
-  // ---------- micro badge (NEW / Updated) ----------
-  let badge = null;
-  if (published) {
-    const now = new Date();
-    const diffHours = (now - published) / (1000 * 60 * 60);
-    if (diffHours <= 24) {
-      badge = "NEW";
-    } else if (diffHours <= 72) {
-      badge = "Updated";
-    }
-  }
-
-  // ---------- status chip (Open / Closing …) ----------
   const statusInfo = buildStatusFromClosing(closing);
+  const badge = buildBadge(tender.published_at);
+  const countdown = humanCountdown(closing);
 
-  // ---------- save handler ----------
- const handleSave = () => {
+  const handleSave = () => {
     if (!canSave) {
-      alert("Login to save this tender.");
+      toast.info("Please log in to save tenders.");
       return;
     }
     if (isSaved) {
       removeSaved?.(id);
+      toast.success("Removed from favourites.");
     } else {
       addSaved?.(id);
+      toast.success("Saved to favourites.");
     }
   };
-  
-
 
   return (
     <article className="tt-card">
+      {/* Top row */}
       <div className="tt-card-top">
         <div className="flex gap-2 flex-wrap">
+          {badge && (
+            <span className="tt-chip tt-chip-accent text-[10px] font-bold px-2 py-0.5">
+              {badge}
+            </span>
+          )}
           {category && <span className="tt-chip tt-chip-blue">{category}</span>}
           {sourceName && <span className="tt-chip tt-chip-cyan">{sourceName}</span>}
-          {statusInfo && <span className={`tt-chip ${statusInfo.className}`}>{statusInfo.label}</span>}
+          {statusInfo && (
+            <span className={`tt-chip ${statusInfo.className}`}>{statusInfo.label}</span>
+          )}
         </div>
+
         <button
           onClick={handleSave}
           className={`tt-save-btn ${isSaved ? "is-saved" : ""}`}
           aria-label={isSaved ? "Unsave tender" : "Save tender"}
+          type="button"
         >
-          <Star size={16} strokeWidth={1.7} />
+          <Star size={16} strokeWidth={1.7} fill={isSaved ? "currentColor" : "none"} />
         </button>
       </div>
 
+      {/* Title */}
       <h3 className="tt-title line-clamp-2">{title}</h3>
 
-      {buyer || location ? (
+      {/* Subline */}
+      {(buyer || location) && buyer !== sourceName && (
         <p className="tt-subline">
-          {buyer ? buyer : ""}
-          {buyer && location ? " • " : ""}
-          {location ? location : ""}
+          {buyer && buyer !== sourceName ? buyer : ""}
+          {buyer && buyer !== sourceName && location ? " • " : ""}
+          {location || ""}
         </p>
-      ) : null}
+      )}
 
+      {/* Meta row */}
       <div className="tt-meta-row">
         {location && (
           <span className="tt-meta-item">
@@ -533,137 +544,50 @@ function PremiumTenderCard({ tender }) {
         {published && (
           <span className="tt-meta-item">
             <CalendarDays size={14} className="tt-meta-icon" />
-            {published.toLocaleDateString()}
+            {published.toLocaleDateString("en-ZA", {
+              day: "numeric",
+              month: "short",
+              year: "numeric",
+            })}
           </span>
         )}
-        {closing && isFuture(closing) && (
+        {closing && isFuture(closing) && countdown && (
           <span className="tt-meta-item">
             <Clock4 size={14} className="tt-meta-icon" />
-            {humanCountdownRich(closing)}
+            Closes in {countdown}
           </span>
         )}
       </div>
 
+      {/* Footer */}
       <div className="tt-footer">
-        <button className="tt-view-btn w-full">View details</button>
+        {id ? (
+          <Link
+            to={`/tenders/${id}`}
+            state={{ row: { ...tender, id }, openAi: false }}
+            className="tt-view-btn w-full inline-flex items-center justify-center gap-2"
+            onClick={() => {
+              try {
+                cacheTender({ ...tender, id });
+              } catch (e) {
+                /* ignore */
+              }
+            }}
+          >
+            View details
+            <ExternalLink size={14} />
+          </Link>
+        ) : (
+          <button className="tt-view-btn w-full" type="button" disabled>
+            View details
+          </button>
+        )}
       </div>
     </article>
   );
 }
 
-/* ------------------------------------------------
-   helper fns used above
-   ------------------------------------------------ */
-function isMeaningful(v) {
-  if (!v) return false;
-  const s = String(v).trim();
-  if (!s) return false;
-  const bad = ["-", "—", "n/a", "na", "null", "none"];
-  return !bad.includes(s.toLowerCase());
-}
-
-// decide status chip
-function buildStatusFromClosing(closingDate) {
-  if (!closingDate) {
-    return { label: "Open", className: "tt-chip-soft" };
-  }
-  if (!isFuture(closingDate)) {
-    // you said: don't show "Closed" on cards
-    return { label: "Open", className: "tt-chip-soft" };
-  }
-
-  const now = new Date();
-  const diffMs = closingDate - now;
-  const diffDays = diffMs / (1000 * 60 * 60 * 24);
-
-  if (diffDays <= 1) {
-    return { label: "Closing today", className: "tt-chip-danger" };
-  }
-  if (diffDays <= 3) {
-    return { label: "Closing in 3 days", className: "tt-chip-warning" };
-  }
-  if (diffDays <= 7) {
-    return { label: "Closing soon", className: "tt-chip-warning" };
-  }
-  return { label: "Open", className: "tt-chip-soft" };
-}
-
-function isFuture(d) {
-  return d.getTime() - Date.now() > 0;
-}
-
-// build one neat line under title
-function buildSubline({ buyer, location }) {
-  if (buyer && location && buyer !== location) return `${buyer} • ${location}`;
-  if (buyer) return buyer;
-  if (location) return location;
-  return "";
-}
-
-// “Closes in 2 months 5 days” / “Closes in 6d” / “Closes in 3h”
-function humanCountdownRich(closingDate) {
-  const now = new Date();
-  const diffMs = closingDate - now;
-  if (diffMs <= 0) return ""; // don't show
-
-  const diffMins = Math.floor(diffMs / (1000 * 60));
-  const diffHours = Math.floor(diffMins / 60);
-  const diffDays = Math.floor(diffHours / 24);
-
-  // longer than 30 days → show months + days
-  if (diffDays > 30) {
-    const months = Math.floor(diffDays / 30);
-    const days = diffDays % 30;
-    if (days > 0) {
-      return `Closes in ${months} mo ${days}d`;
-    }
-    return `Closes in ${months} mo`;
-  }
-
-  if (diffDays > 0) return `Closes in ${diffDays}d`;
-  if (diffHours > 0) return `Closes in ${diffHours}h`;
-  return `Closes in ${diffMins}m`;
-}
-
-
-/* ------------------------------------------------
-   helpers
-   ------------------------------------------------ */
-function computeUrgency(closingDate) {
-  if (!closingDate) return { urgencyLabel: null, urgencyClass: "" };
-  const now = new Date();
-  const diffMs = closingDate - now;
-  if (diffMs < 0) {
-    return { urgencyLabel: null, urgencyClass: "" };
-  }
-  const diffDays = diffMs / (1000 * 60 * 60 * 24);
-
-  if (diffDays <= 1) {
-    return { urgencyLabel: "Closing today", urgencyClass: "tt-chip-danger" };
-  }
-  if (diffDays <= 3) {
-    return { urgencyLabel: "Closing in 3 days", urgencyClass: "tt-chip-warning" };
-  }
-  if (diffDays <= 7) {
-    return { urgencyLabel: "Closing soon", urgencyClass: "tt-chip-soft" };
-  }
-  return { urgencyLabel: null, urgencyClass: "" };
-}
-
-function humanCountdown(closingDate) {
-  const now = new Date();
-  const diffMs = closingDate - now;
-  if (diffMs <= 0) return "Closed";
-  const diffMins = Math.floor(diffMs / (1000 * 60));
-  const diffHours = Math.floor(diffMins / 60);
-  const diffDays = Math.floor(diffHours / 24);
-
-  if (diffDays > 0) return `Closes in ${diffDays}d`;
-  if (diffHours > 0) return `Closes in ${diffHours}h`;
-  return `Closes in ${diffMins}m`;
-}
-
-/* ----------------- small components ----------------- */
+/* ===================== SMALL COMPONENTS ===================== */
 
 function InfoCard({ title, desc }) {
   return (

@@ -1,19 +1,24 @@
-// src/routes/TendersPage.jsx
-import React, { useContext, useEffect, useMemo, useState } from "react";
+import React, { useContext, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { MapPin, CalendarDays, Clock4 } from "lucide-react";
+import { MapPin, CalendarDays, Clock4, Star } from "lucide-react";
 import { listTenders, cacheTender } from "../lib/api.js";
 import useDebouncedValue from "../hooks/useDebouncedValue.js";
 import { PrefsContext } from "../contexts/PrefsContext.js";
-
-
+import {
+  parseDate,
+  prettySource,
+  isMeaningful,
+  isFuture,
+  humanCountdown,
+  buildStatusChip,
+  buildBadge,
+  categorySlug,
+  getSourceSlug,
+  makeComparator,
+  buildPageList,
+} from "../lib/tenderUtils.js";
 
 /* ===================== CONFIG ===================== */
-
-// If your API emits numeric source_id, map to slugs
-const SOURCE_ID_MAP = { 1: "etenders", 2: "eskom", 3: "sanral", 4: "transnet" };
-
-// Categories shown to users (labels)
 const CATEGORIES = [
   "Construction & Civil",
   "Distribution",
@@ -28,106 +33,10 @@ const CATEGORIES = [
   "Transport & Fleet",
   "Facilities & Maintenance",
   "Electrical & Energy",
+  "Goods & Services",
 ];
 
-// When applying client-side filters, fetch a larger chunk to filter locally
-const FETCH_CHUNK = 400;
-
-/* ===================== TEXT/DATE HELPERS ===================== */
-
-const norm = (v) =>
-  String(v || "")
-    .normalize("NFKD")
-    .toLowerCase()
-    .replace(/&/g, " and ")
-    .replace(/[^\w\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-function parseDate(d) {
-  const t = d ? new Date(d) : null;
-  return t && !isNaN(t.getTime()) ? t : null;
-}
-
-function prettySource(s) {
-  if (!s) return "";
-  const low = String(s).toLowerCase();
-  if (low === "eskom") return "ESKOM";
-  if (low === "sanral") return "SANRAL";
-  if (low === "transnet") return "Transnet";
-  if (low === "etenders") return "National eTenders";
-  return s;
-}
-
-// Turn any category text (any case / formatting) into a stable slug
-function categorySlug(s) {
-  const n = norm(s);
-  if (!n) return "";
-  if (/(construction|civil)/.test(n)) return "construction-civil";
-  if (/distribution/.test(n)) return "distribution";
-  if (/generation/.test(n)) return "generation";
-  if (/corporate/.test(n)) return "corporate";
-  if (/engineering/.test(n)) return "engineering";
-  if (/(it|software)/.test(n)) return "it-software";
-  if (/security/.test(n)) return "security";
-  if (/(clean|hygiene)/.test(n)) return "cleaning-hygiene";
-  if (/(medical|health)/.test(n)) return "medical-healthcare";
-  if (/(consult|training)/.test(n)) return "consulting-training";
-  if (/(transport|fleet)/.test(n)) return "transport-fleet";
-  if (/(facilit|maintain)/.test(n)) return "facilities-maintenance";
-  if (/(electrical|energy)/.test(n)) return "electrical-energy";
-  return n; // fallback
-}
-
-function getSourceSlug(row) {
-  const fromField = norm(row.source || row.publisher || row.buyer);
-  if (["eskom", "sanral", "transnet", "etenders"].includes(fromField)) return fromField;
-  const viaId = SOURCE_ID_MAP[row.source_id] || "";
-  return norm(viaId);
-}
-
-/* ===================== SORT HELPERS ===================== */
-
-function cmpDates(a, b, dir = "asc") {
-  const av = a ? a.getTime() : -Infinity;
-  const bv = b ? b.getTime() : -Infinity;
-  const diff = av - bv;
-  return dir === "asc" ? diff : -diff;
-}
-
-function makeComparator(sortKey) {
-  switch (sortKey) {
-    case "published_at":
-      return (a, b) => cmpDates(parseDate(a.published_at), parseDate(b.published_at), "asc");
-    case "-published_at":
-      return (a, b) => cmpDates(parseDate(a.published_at), parseDate(b.published_at), "desc");
-    case "closing_at":
-      return (a, b) => cmpDates(parseDate(a.closing_at), parseDate(b.closing_at), "asc");
-    case "-closing_at":
-      return (a, b) => cmpDates(parseDate(a.closing_at), parseDate(b.closing_at), "desc");
-    default:
-      return (a, b) => cmpDates(parseDate(a.published_at), parseDate(b.published_at), "desc");
-  }
-}
-
-/* ===================== PAGER HELPERS ===================== */
-
-function buildPageList(curr, total, { siblings = 1, boundaries = 1 } = {}) {
-  const pages = [];
-  const start = Math.max(2, curr - siblings);
-  const end = Math.min(total - 1, curr + siblings);
-  for (let i = 1; i <= Math.min(boundaries, total); i++) pages.push(i);
-  if (start > boundaries + 1) pages.push("…");
-  for (let i = start; i <= end; i++) pages.push(i);
-  if (end < total - boundaries) pages.push("…");
-  for (let i = Math.max(total - boundaries + 1, 1); i <= total; i++) {
-    if (!pages.includes(i)) pages.push(i);
-  }
-  return pages.filter((p) => p >= 1 && p <= total);
-}
-
-/* ===================== PAGE ===================== */
-
+/* ===================== MAIN PAGE ===================== */
 export default function TendersPage() {
   const navigate = useNavigate();
   const ctx = useContext(PrefsContext);
@@ -137,15 +46,15 @@ export default function TendersPage() {
   const addSaved = ctx?.addSavedTender;
   const removeSaved = ctx?.removeSavedTender;
 
-  // data
-  const [rows, setRows] = useState([]);
-  const [total, setTotal] = useState(0);
+  // State
+  const [allRows, setAllRows] = useState([]); // all fetched data from API
+  const [displayRows, setDisplayRows] = useState([]); // after filtering/sorting/paging
+  const [totalCount, setTotalCount] = useState(0); // API total or filtered total
 
-  // UI state
   const [view, setView] = useState("all"); // "all" | "saved"
   const [showAdvanced, setShowAdvanced] = useState(false);
 
-  // filters
+  // Filters
   const [q, setQ] = useState("");
   const qDebounced = useDebouncedValue(q, 350);
   const [source, setSource] = useState("");
@@ -154,162 +63,178 @@ export default function TendersPage() {
   const [closingAfter, setClosingAfter] = useState("");
   const [closingBefore, setClosingBefore] = useState("");
 
-  // paging + sort
+  // Pagination & sort
   const [page, setPage] = useState(1);
   const [pageSize] = useState(20);
   const [sort, setSort] = useState("-published_at");
 
-  // status
+  // UI
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // jump to first page whenever filters/view/sort change
+  // Reset to page 1 when filters or sort/view change
   useEffect(() => {
     setPage(1);
   }, [qDebounced, source, category, location, closingAfter, closingBefore, sort, view]);
 
-  // Are we doing client-side filters?
-  const clientFiltersActive =
-    !!source || !!category || !!location || !!closingAfter || !!closingBefore;
-
-  // Build the request for the API:
-  // - Always send q + sort so backend can help reduce volume
-  // - NEVER send category/source/location/date range → we handle locally
-  const apiFilters = useMemo(() => {
-    const f = {
-      page: clientFiltersActive ? 1 : page,
-      pageSize: clientFiltersActive ? FETCH_CHUNK : pageSize,
-      q: qDebounced,
-      sort,
-    };
-    return f;
-  }, [clientFiltersActive, page, pageSize, qDebounced, sort]);
-
-  // fetch + client filtering/sorting/paging
+  /* -------- Fetch ALL records robustly (respects server page caps) -------- */
   useEffect(() => {
-    let alive = true;
+    let mounted = true;
+
     (async () => {
       try {
         setLoading(true);
         setError("");
+        setAllRows([]);
 
-        const data = await listTenders(apiFilters);
-        if (!alive) return;
+        // only text query goes server-side
+        const baseParams = { sort };
+        if (qDebounced) baseParams.q = qDebounced;
 
-        const items = data.results || data.items || [];
-        const grandTotal = data.total ?? data.count ?? items.length;
+        // request in safe chunks; server may cap this further (e.g. 20)
+        const PAGE_LIMIT = 200;
+        let offset = 0;
+        let allData = [];
+        let total = 0;
 
-        // ---- client-side filters ----
-        let filtered = items;
+        while (mounted) {
+          const resp = await listTenders({ ...baseParams, limit: PAGE_LIMIT, offset });
+          if (!mounted) return;
 
-        // keyword
-        if (qDebounced) {
-          const needle = norm(qDebounced);
-          filtered = filtered.filter(
-            (t) =>
-              norm(t.title).includes(needle) ||
-              norm(t.buyer).includes(needle) ||
-              norm(t.location).includes(needle)
-          );
+          const items = resp.results ?? resp.items ?? [];
+          total = resp.total ?? resp.count ?? total ?? 0;
+
+          if (items.length === 0) break;
+
+          allData = allData.concat(items);
+          offset += items.length;
+
+          if (allData.length >= total) break;
         }
 
-        // publisher
-        if (source) {
-          const wanted = norm(source);
-          filtered = filtered.filter((t) => getSourceSlug(t) === wanted);
+        if (mounted) {
+          setAllRows(allData);
+          // keep the full API total here; we’ll swap to filtered total only when filters are active
+          setTotalCount(total);
         }
-
-        // category (robust to ANY casing/format)
-        if (category) {
-          const wanted = categorySlug(category);
-          filtered = filtered.filter((t) => categorySlug(t.category) === wanted);
-        }
-
-        // location contains (case-insensitive)
-        if (location) {
-          const loc = norm(location);
-          filtered = filtered.filter((t) => norm(t.location).includes(loc));
-        }
-
-        // closing date range (inclusive)
-        if (closingAfter) {
-          const ca = new Date(closingAfter);
-          ca.setHours(0, 0, 0, 0);
-          filtered = filtered.filter((t) => {
-            const d = parseDate(t.closing_at);
-            return !!d && d >= ca;
-          });
-        }
-        if (closingBefore) {
-          const cb = new Date(closingBefore);
-          cb.setHours(23, 59, 59, 999);
-          filtered = filtered.filter((t) => {
-            const d = parseDate(t.closing_at);
-            return !!d && d <= cb;
-          });
-        }
-
-        // favourites view
-        let finalItems =
-          view === "saved"
-            ? savedIds.length === 0
-              ? []
-              : filtered.filter((t) => {
-                  const id = t.id ?? t.referenceNumber;
-                  return savedIds.includes(id);
-                })
-            : filtered;
-
-        // guarantee sort
-        finalItems.sort(makeComparator(sort));
-
-        // totals & slicing
-        const hasClientFilters = clientFiltersActive || view === "saved" || !!qDebounced;
-        const totalForPager = hasClientFilters ? finalItems.length : grandTotal;
-
-        const start = (page - 1) * pageSize;
-        const end = start + pageSize;
-        const visibleRows = hasClientFilters ? finalItems.slice(start, end) : finalItems;
-
-        if (!alive) return;
-        setRows(visibleRows);
-        setTotal(totalForPager);
       } catch (e) {
-        console.error(e);
-        if (!alive) return;
-        setRows([]);
-        setTotal(0);
+        console.error("Failed to fetch tenders:", e);
+        if (!mounted) return;
+        setAllRows([]);
+        setTotalCount(0);
         setError(e?.message || "Failed to load tenders.");
       } finally {
-        if (alive) setLoading(false);
+        if (mounted) setLoading(false);
       }
     })();
+
     return () => {
-      alive = false;
+      mounted = false;
     };
+  }, [qDebounced, sort]);
+
+  /* -------- Apply filters, sort, pagination (client-side) -------- */
+  useEffect(() => {
+    let filtered = [...allRows];
+
+    // text (defensive double-check)
+    if (qDebounced) {
+      const needle = qDebounced.toLowerCase().trim();
+      filtered = filtered.filter((t) =>
+        [t.title, t.buyer, t.location, t.category]
+          .filter(Boolean)
+          .some((field) => String(field).toLowerCase().includes(needle)),
+      );
+    }
+
+    // publisher
+    if (source) {
+      const wanted = source.toLowerCase();
+      filtered = filtered.filter((t) => getSourceSlug(t) === wanted);
+    }
+
+    // category
+    if (category) {
+      const wanted = categorySlug(category);
+      filtered = filtered.filter((t) => categorySlug(t.category) === wanted);
+    }
+
+    // location contains
+    if (location) {
+      const loc = location.toLowerCase().trim();
+      filtered = filtered.filter((t) => String(t.location || "").toLowerCase().includes(loc));
+    }
+
+    // inclusive date range (midnight → end of day)
+    if (closingAfter) {
+      const ca = new Date(closingAfter);
+      ca.setHours(0, 0, 0, 0);
+      filtered = filtered.filter((t) => {
+        const d = parseDate(t.closing_at);
+        return d ? d >= ca : false; // exclude if missing when range applied
+      });
+    }
+    if (closingBefore) {
+      const cb = new Date(closingBefore);
+      cb.setHours(23, 59, 59, 999);
+      filtered = filtered.filter((t) => {
+        const d = parseDate(t.closing_at);
+        return d ? d <= cb : false;
+      });
+    }
+
+    // favourites view
+    if (view === "saved") {
+      filtered = filtered.filter((t) => {
+        const id = t.id ?? t.referenceNumber;
+        return savedIds.includes(id);
+      });
+    }
+
+    // sort
+    filtered.sort(makeComparator(sort));
+
+    // totals: only switch to filtered totals if filters or saved view are active
+    const filtersActive = Boolean(
+      qDebounced || source || category || location || closingAfter || closingBefore || view === "saved",
+    );
+    const filteredTotal = filtered.length;
+
+    // clamp page after filters changed
+    const pageCountNext = Math.max(1, Math.ceil(filteredTotal / pageSize));
+    const safePage = Math.min(page, pageCountNext);
+
+    const start = (safePage - 1) * pageSize;
+    const end = start + pageSize;
+    setDisplayRows(filtered.slice(start, end));
+
+    if (filtersActive) {
+      setTotalCount(filteredTotal);
+    }
+    // if page changed due to clamping, update once
+    if (page !== safePage) setPage(safePage);
   }, [
-    apiFilters,
-    view,
-    savedIds,
-    clientFiltersActive,
+    allRows,
     qDebounced,
     source,
     category,
     location,
     closingAfter,
     closingBefore,
+    view,
+    savedIds,
     sort,
     page,
     pageSize,
   ]);
 
-  // pagination info
-  const startItem = (page - 1) * pageSize + 1;
-  const endItem = Math.min(page * pageSize, total || 0);
-  const pageCount = Math.max(1, Math.ceil((total || 0) / pageSize));
+  // Pagination helpers
+  const startItem = totalCount > 0 ? (page - 1) * pageSize + 1 : 0;
+  const endItem = Math.min(page * pageSize, totalCount);
+  const pageCount = Math.max(1, Math.ceil(totalCount / pageSize));
   const pages = buildPageList(page, pageCount, { siblings: 1, boundaries: 1 });
 
-  // helpers
+  // Clear all filters
   const clearFilters = () => {
     setQ("");
     setSource("");
@@ -318,43 +243,47 @@ export default function TendersPage() {
     setClosingAfter("");
     setClosingBefore("");
     setView("all");
+    setPage(1);
   };
+
+  const hasActiveFilters =
+    qDebounced || source || category || location || closingAfter || closingBefore;
 
   const isSavedViewEmpty = view === "saved" && savedIds.length === 0;
 
   return (
     <div className="space-y-5">
-      {/* heading */}
+      {/* Heading */}
       <div>
-        <h1 className="text-2xl md:text-3xl font-bold text-slate-50">South African tenders</h1>
+        <h1 className="text-2xl md:text-3xl font-bold text-slate-50">South African Tenders</h1>
         <p className="text-slate-200/70 mt-1">
           Browse, filter, and save tenders. Switch to <strong>Favourites</strong> to see only yours.
         </p>
       </div>
 
-      {/* filter bar */}
+      {/* Filter panel */}
       <div className="glass-panel p-4 space-y-3" style={{ "--panel-bg": 0.03 }}>
-        {/* tabs */}
+        {/* View tabs */}
         <div className="tender-tabs">
           <button onClick={() => setView("all")} className={view === "all" ? "is-active" : ""}>
-            All
+            All Tenders
           </button>
           <button onClick={() => setView("saved")} className={view === "saved" ? "is-active" : ""}>
-            Favourites
+            Favourites {savedIds.length > 0 && `(${savedIds.length})`}
           </button>
         </div>
 
-        {/* main filters */}
+        {/* Main filter row */}
         <div className="flex flex-wrap gap-3 items-center">
           <input
             className="input flex-1 min-w-[220px]"
-            placeholder="Search title/description/buyer…"
+            placeholder="Search title, buyer, location…"
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
-          <select className="select md:w-40" value={sort} onChange={(e) => setSort(e.target.value)}>
-            <option value="-published_at">Newest</option>
-            <option value="published_at">Oldest</option>
+          <select className="select md:w-44" value={sort} onChange={(e) => setSort(e.target.value)}>
+            <option value="-published_at">Newest first</option>
+            <option value="published_at">Oldest first</option>
             <option value="closing_at">Closing soonest</option>
             <option value="-closing_at">Closing latest</option>
           </select>
@@ -363,16 +292,16 @@ export default function TendersPage() {
             type="button"
             onClick={() => setShowAdvanced((s) => !s)}
           >
-            {showAdvanced ? "Hide filters" : "Advanced filters"}
+            {showAdvanced ? "Hide" : "Show"} filters
           </button>
-          {(qDebounced || source || category || location || closingAfter || closingBefore) && (
+          {hasActiveFilters && (
             <button className="btn text-sm" type="button" onClick={clearFilters}>
-              Clear
+              Clear all
             </button>
           )}
         </div>
 
-        {/* advanced panel */}
+        {/* Advanced filters */}
         {showAdvanced && (
           <div className="advanced-filter-panel">
             <div>
@@ -387,8 +316,12 @@ export default function TendersPage() {
             </div>
             <div>
               <label>Category</label>
-              <select value={category} onChange={(e) => setCategory(e.target.value)} className="select">
-                <option value="">All</option>
+              <select
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                className="select"
+              >
+                <option value="">All categories</option>
                 {CATEGORIES.map((c) => (
                   <option key={c} value={c}>
                     {c}
@@ -400,9 +333,9 @@ export default function TendersPage() {
               <label>Location contains</label>
               <input
                 className="input"
+                placeholder="e.g. Gauteng, Durban, Cape Town"
                 value={location}
                 onChange={(e) => setLocation(e.target.value)}
-                placeholder="e.g. Durban, KZN, Western Cape"
               />
             </div>
             <div>
@@ -427,226 +360,294 @@ export default function TendersPage() {
         )}
       </div>
 
-      {/* summary line */}
+      {/* Active filter chips */}
+      {hasActiveFilters && (
+        <div className="flex flex-wrap gap-2 items-center">
+          <span className="text-xs text-slate-400">Active filters:</span>
+          {qDebounced && <FilterChip label="Search" value={qDebounced} onClear={() => setQ("")} />}
+          {source && (
+            <FilterChip label="Publisher" value={prettySource(source)} onClear={() => setSource("")} />
+          )}
+          {category && (
+            <FilterChip label="Category" value={category} onClear={() => setCategory("")} />
+          )}
+          {location && (
+            <FilterChip label="Location" value={location} onClear={() => setLocation("")} />
+          )}
+          {closingAfter && (
+            <FilterChip
+              label="From"
+              value={new Date(closingAfter).toLocaleDateString()}
+              onClear={() => setClosingAfter("")}
+            />
+          )}
+          {closingBefore && (
+            <FilterChip
+              label="To"
+              value={new Date(closingBefore).toLocaleDateString()}
+              onClear={() => setClosingBefore("")}
+            />
+          )}
+        </div>
+      )}
+
+      {/* Summary */}
       <div className="text-sm text-slate-200/65">
         {view === "saved" ? (
           isSavedViewEmpty ? (
-            <>You haven’t favourited any tenders yet. ⭐ Add some first.</>
+            <>You haven't favourited any tenders yet. ⭐ Add some from the <strong>All</strong> view.</>
           ) : (
-            <>Showing your favourites ({savedIds.length})</>
+            <>
+              Showing <strong>{displayRows.length}</strong> of your <strong>{savedIds.length}</strong> favourites
+            </>
           )
-        ) : total ? (
+        ) : totalCount > 0 ? (
           <>
             Showing <strong>{startItem}</strong>–<strong>{endItem}</strong> of{" "}
-            <strong>{total}</strong> tenders
+            <strong>{totalCount}</strong> tenders
           </>
         ) : (
-          <>No tenders found.</>
+          <>No tenders found matching your criteria.</>
         )}
       </div>
 
-      {/* list */}
+      {/* Error */}
       {error && (
         <div className="alert alert-error bg-red-500/10 border border-red-200/20 rounded-lg px-4 py-3">
           {error}
         </div>
       )}
 
+      {/* Loading / empty states */}
       {loading ? (
-        <div className="text-slate-200/70 py-10 text-center">Loading tenders…</div>
-      ) : view === "saved" && isSavedViewEmpty ? (
-        <div className="glass-panel p-6 text-center text-slate-100/70">
-          ⭐ You haven’t favourited anything yet. Go to <strong>All</strong>, click the star on a
-          tender, then come back.
+        <div className="text-slate-200/70 py-10 text-center">
+          <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-current border-r-transparent motion-reduce:animate-[spin_1.5s_linear_infinite]" />
+          <p className="mt-3">Loading tenders…</p>
+        </div>
+      ) : isSavedViewEmpty ? (
+        <div className="glass-panel p-8 text-center" style={{ "--panel-bg": 0.03 }}>
+          <p className="text-slate-100/70 text-lg">⭐ You haven't favourited anything yet.</p>
+          <p className="text-slate-300/60 mt-2">
+            Go to <strong>All Tenders</strong>, click the star on cards you want to save, then come back here.
+          </p>
+        </div>
+      ) : displayRows.length === 0 && hasActiveFilters ? (
+        <div className="glass-panel p-8 text-center" style={{ "--panel-bg": 0.03 }}>
+          <p className="text-slate-100/70 text-lg">No tenders match your filters.</p>
+          <button onClick={clearFilters} className="btn btn-primary glow-cta mt-4">
+            Clear filters
+          </button>
         </div>
       ) : (
-        <div className="tender-grid">
-          {rows.map((t) => {
-            const id = t.id ?? t.referenceNumber;
-            const isSaved = savedIds.includes(id);
-            return (
-              <TenderRowCard
-                key={id}
-                tender={t}
-                isSaved={isSaved}
-                onSave={() => {
-                  if (!canSave) {
-                    alert("Login to add favourites.");
-                    return;
-                  }
-                  if (isSaved) removeSaved?.(id);
-                  else addSaved?.(id);
-                  cacheTender({ ...t, id });
-                }}
-                onView={(openAi) => {
-                  cacheTender({ ...t, id });
-                  navigate(`/tenders/${id}`, {
-                    state: { row: { ...t, id }, openAi: !!openAi },
-                  });
-                }}
-              />
-            );
-          })}
-        </div>
-      )}
+        <>
+          {/* Tender grid */}
+          <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-5">
+            {displayRows.map((t) => {
+              const id = t.id ?? t.referenceNumber;
+              const isSaved = savedIds.includes(id);
+              return (
+                <TenderCard
+                  key={id}
+                  tender={t}
+                  isSaved={isSaved}
+                  onSave={() => {
+                    if (!canSave) {
+                      alert("Please log in to save tenders.");
+                      return;
+                    }
+                    if (isSaved) {
+                      removeSaved?.(id);
+                    } else {
+                      addSaved?.(id);
+                    }
+                    cacheTender({ ...t, id });
+                  }}
+                  onView={() => {
+                    cacheTender({ ...t, id });
+                    navigate(`/tenders/${id}`, {
+                      state: { row: { ...t, id }, openAi: false },
+                    });
+                  }}
+                  onAi={() => {
+                    cacheTender({ ...t, id });
+                    navigate(`/tenders/${id}`, {
+                      state: { row: { ...t, id }, openAi: true },
+                    });
+                  }}
+                />
+              );
+            })}
+          </div>
 
-      {/* numbered pager */}
-      {!loading && view !== "saved" && total > pageSize ? (
-        <div className="flex items-center justify-between gap-3 pt-2">
-          <div className="flex gap-2">
-            <button
-              className="btn btn-outline ts text-sm"
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page === 1}
-            >
-              Prev
-            </button>
-
-            {pages.map((p, i) =>
-              p === "…" ? (
-                <span key={`ellipsis-${i}`} className="px-2 text-slate-400">
-                  …
-                </span>
-              ) : (
+          {/* Pagination */}
+          {totalCount > pageSize && (
+            <div className="flex items-center justify-between gap-3 pt-8 pb-4">
+              <div className="flex gap-2 flex-wrap items-center">
                 <button
-                  key={p}
-                  className={`btn btn-outline ts text-sm ${p === page ? "btn-active" : ""}`}
-                  onClick={() => setPage(p)}
+                  className="btn btn-outline ts text-sm px-4 py-2"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page === 1}
                 >
-                  {p}
+                  ← Prev
                 </button>
-              )
-            )}
 
-            <button
-              className="btn btn-outline ts text-sm"
-              onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
-              disabled={page >= pageCount}
-            >
-              Next
-            </button>
-          </div>
+                {pages.map((p, i) =>
+                  p === "…" ? (
+                    <span key={`ellipsis-${i}`} className="px-2 text-slate-400 self-center">
+                      …
+                    </span>
+                  ) : (
+                    <button
+                      key={p}
+                      className={`btn btn-outline ts text-sm px-3 py-2 ${
+                        p === page ? "btn-active border-cyan-400 bg-cyan-500/20" : ""
+                      }`}
+                      onClick={() => setPage(p)}
+                    >
+                      {p}
+                    </button>
+                  ),
+                )}
 
-          <div className="text-xs text-slate-200/45">
-            Page {page} / {pageCount} • {total} tenders
-          </div>
-        </div>
-      ) : null}
+                <button
+                  className="btn btn-outline ts text-sm px-4 py-2"
+                  onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+                  disabled={page >= pageCount}
+                >
+                  Next →
+                </button>
+              </div>
+
+              <div className="text-xs text-slate-200/45 whitespace-nowrap">
+                Page <strong>{page}</strong> of <strong>{pageCount}</strong>
+              </div>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
 
-/* ========================= CARD ========================= */
-
-function TenderRowCard({ tender, isSaved, onSave, onView }) {
-  const id = tender.id ?? tender.referenceNumber;
+/* ===================== TENDER CARD ===================== */
+function TenderCard({ tender, isSaved, onSave, onView, onAi }) {
   const title = tender.title || "Untitled tender";
-  const category = nice(tender.category);
-  const source = prettySource(
-    tender.source || tender.publisher || tender.buyer || SOURCE_ID_MAP[tender.source_id]
-  );
-  const buyer = nice(tender.buyer);
-  const location = nice(tender.location);
+
+  const categoryRaw = tender.category;
+  const category =
+    categoryRaw && isMeaningful(categoryRaw)
+      ? categoryRaw.charAt(0).toUpperCase() + categoryRaw.slice(1).toLowerCase()
+      : null;
+
+  const sourceRaw = tender.source || tender.publisher || tender.buyer || null;
+  const sourceName = sourceRaw && isMeaningful(sourceRaw) ? prettySource(sourceRaw) : null;
+
+  const buyer = tender.buyer && isMeaningful(tender.buyer) ? tender.buyer : null;
+  const location = tender.location && isMeaningful(tender.location) ? tender.location : null;
+
   const published = parseDate(tender.published_at);
   const closing = parseDate(tender.closing_at);
 
-  const status = buildStatus(closing);
+  const statusInfo = buildStatusChip(closing);
+  const badge = buildBadge(tender.published_at);
+  const countdown = humanCountdown(closing);
 
   return (
-    <article className="tender-card-nice relative">
-      {/* star */}
-      <button
-        onClick={onSave}
-        className={`save-btn ${isSaved ? "is-saved" : ""} absolute top-3 right-3`}
-        title={isSaved ? "Remove from favourites" : "Add to favourites"}
-      >
-        ★
-      </button>
+    <article className="tt-card">
+      {/* Top row */}
+      <div className="tt-card-top">
+        <div className="flex gap-2 flex-wrap">
+          {badge && (
+            <span className="tt-chip tt-chip-accent text-[10px] font-bold px-2 py-0.5">{badge}</span>
+          )}
+          {category && <span className="tt-chip tt-chip-blue">{category}</span>}
+          {sourceName && <span className="tt-chip tt-chip-cyan">{sourceName}</span>}
+          {statusInfo && <span className={`tt-chip ${statusInfo.className}`}>{statusInfo.label}</span>}
+        </div>
 
-      {/* chip row */}
-      <div className="tender-chip-row pr-10">
-        {category && <span className="tt-chip tt-chip-blue">{category}</span>}
-        {source && <span className="tt-chip tt-chip-cyan">{source}</span>}
-        {status && <span className={`tt-chip ${status.className}`}>{status.label}</span>}
+        <button
+          onClick={onSave}
+          className={`tt-save-btn ${isSaved ? "is-saved" : ""}`}
+          aria-label={isSaved ? "Unsave tender" : "Save tender"}
+          type="button"
+        >
+          <Star
+            size={16}
+            strokeWidth={1.7}
+            fill={isSaved ? "#fbbf24" : "none"}
+            color={isSaved ? "#fbbf24" : "currentColor"}
+            className={isSaved ? "animate-pulse drop-shadow-lg drop-shadow-yellow-400" : ""}
+          />
+        </button>
       </div>
 
-      {/* title */}
-      <h2 className="tender-title mt-2">{title}</h2>
+      {/* Title */}
+      <h3 className="tt-title line-clamp-2">{title}</h3>
 
-      {/* sub */}
-      <p className="tender-sub">
-        {buyer ? buyer : "Official publisher"}
-        {location ? ` • ${location}` : ""}
-      </p>
+      {/* Subline */}
+      {(buyer || location) && buyer !== sourceName && (
+        <p className="tt-subline">
+          {buyer && buyer !== sourceName ? buyer : ""}
+          {buyer && buyer !== sourceName && location ? " • " : ""}
+          {location || ""}
+        </p>
+      )}
 
-      {/* meta with icons */}
-      <div className="tender-meta-icons mt-2">
+      {/* Meta row */}
+      <div className="tt-meta-row">
         {location && (
-          <span>
-            <MapPin size={14} className="inline-block mr-1 opacity-70" />
+          <span className="tt-meta-item">
+            <MapPin size={14} className="tt-meta-icon" />
             {location}
           </span>
         )}
         {published && (
-          <span>
-            <CalendarDays size={14} className="inline-block mr-1 opacity-70" />
-            {published.toLocaleDateString()}
+          <span className="tt-meta-item">
+            <CalendarDays size={14} className="tt-meta-icon" />
+            {published.toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" })}
           </span>
         )}
-        {closing && isFuture(closing) && (
-          <span>
-            <Clock4 size={14} className="inline-block mr-1 opacity-70" />
-            {humanCountdown(closing)}
+        {closing && isFuture(closing) && countdown && (
+          <span className="tt-meta-item">
+            <Clock4 size={14} className="tt-meta-icon" />
+            Closes in {countdown}
           </span>
         )}
       </div>
 
-      {/* actions */}
-      <div className="tender-actions-nice mt-3 flex flex-col gap-2 sm:flex-row">
-        <button onClick={() => onView(false)} className="btn btn-primary glow-cta">
-          View details
-        </button>
-        <button onClick={() => onView(true)} className="btn btn-secondary sm:ml-2">
-          AI summaries
-        </button>
+      {/* Footer: fixed at bottom */}
+      <div className="tt-footer mt-auto">
+        <div className="flex items-center gap-2 w-full">
+          <button onClick={onView} className="tt-view-btn w-full" type="button">
+            View details
+          </button>
+          <button
+            onClick={onAi}
+            className="btn btn-outline ts text-xs px-3 py-2 whitespace-nowrap"
+            type="button"
+            title="Open with Gen-AI summary"
+          >
+            AI summary
+          </button>
+        </div>
       </div>
     </article>
   );
 }
 
-/* ========================= SMALL UTILS ========================= */
-
-function nice(v) {
-  if (!v) return "";
-  const s = String(v).trim();
-  if (!s) return "";
-  const bad = ["-", "—", "n/a", "na", "null", "none"];
-  if (bad.includes(s.toLowerCase())) return "";
-  return s;
-}
-
-function isFuture(d) {
-  return d.getTime() - Date.now() > 0;
-}
-
-function buildStatus(closingDate) {
-  if (!closingDate || !isFuture(closingDate)) {
-    return { label: "Open", className: "tt-chip-soft" };
-  }
-  const diffDays = (closingDate - new Date()) / (1000 * 60 * 60 * 24);
-  if (diffDays <= 1) return { label: "Closing today", className: "tt-chip-danger" };
-  if (diffDays <= 3) return { label: "Closing in 3 days", className: "tt-chip-warning" };
-  if (diffDays <= 7) return { label: "Closing soon", className: "tt-chip-warning" };
-  return { label: "Open", className: "tt-chip-soft" };
-}
-
-function humanCountdown(closingDate) {
-  const diffMs = closingDate - new Date();
-  if (diffMs <= 0) return "";
-  const mins = Math.floor(diffMs / (1000 * 60));
-  const hours = Math.floor(mins / 60);
-  const days = Math.floor(hours / 24);
-  if (days > 0) return `Closes in ${days}d`;
-  if (hours > 0) return `Closes in ${hours}h`;
-  return `Closes in ${mins}m`;
+/* ===================== FILTER CHIP ===================== */
+function FilterChip({ label, value, onClear }) {
+  return (
+    <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-400/30 text-sm">
+      <span className="text-slate-300/80">{label}:</span>
+      <span className="text-slate-50 font-medium">{value}</span>
+      <button
+        onClick={onClear}
+        className="ml-1 text-slate-400 hover:text-slate-100 transition"
+        aria-label={`Clear ${label}`}
+      >
+        ×
+      </button>
+    </span>
+  );
 }

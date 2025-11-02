@@ -1,15 +1,9 @@
-// src/lib/tenderUtils.js
-
 /**
  * COMPLETE TENDER UTILITIES
  * All helper functions for tender display, filtering, sorting, and pagination
  */
 
 /* ===================== TEXT NORMALIZATION ===================== */
-
-/**
- * Normalizes text for robust, case/diacritic insensitive comparisons
- */
 export function norm(v) {
   return String(v || "")
     .normalize("NFKD")
@@ -20,9 +14,6 @@ export function norm(v) {
     .trim();
 }
 
-/**
- * Check if a value is meaningful (not empty, null, or placeholder)
- */
 export function isMeaningful(v) {
   if (!v) return false;
   const s = String(v).trim();
@@ -31,39 +22,23 @@ export function isMeaningful(v) {
   return !bad.includes(s.toLowerCase());
 }
 
-/* ===================== DATE HANDLING ===================== */
-
-/**
- * Parse a value into a valid Date or return null
- */
+/* ===================== DATES ===================== */
 export function parseDate(d) {
   if (!d) return null;
   const t = new Date(d);
   return Number.isNaN(+t) ? null : t;
 }
 
-/**
- * Check if date is in the future
- */
 export function isFuture(d) {
   return d instanceof Date && d.getTime() > Date.now();
 }
 
-/**
- * Format date as human-readable string
- */
 export function formatDate(d, format = "short") {
   const date = parseDate(d);
   if (!date) return "—";
-
   if (format === "short") {
-    return date.toLocaleDateString("en-ZA", {
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-    });
+    return date.toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" });
   }
-
   if (format === "long") {
     return date.toLocaleDateString("en-ZA", {
       weekday: "long",
@@ -72,15 +47,10 @@ export function formatDate(d, format = "short") {
       year: "numeric",
     });
   }
-
   return date.toLocaleDateString("en-ZA");
 }
 
-/* ===================== SOURCE/PUBLISHER HANDLING ===================== */
-
-/**
- * Human-readable publisher name from slug/variants
- */
+/* ===================== SOURCES ===================== */
 export function prettySource(s) {
   if (!s) return "";
   const low = String(s).toLowerCase();
@@ -88,52 +58,28 @@ export function prettySource(s) {
   if (low === "sanral") return "SANRAL";
   if (low === "transnet") return "Transnet";
   if (low === "etenders" || low === "national etenders") return "National eTenders";
-  // Capitalize first letter for unknown sources
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-/**
- * Map numeric source_id to slug
- */
 export function mapSourceIdToSlug(id) {
-  const map = {
-    1: "etenders",
-    2: "eskom",
-    3: "sanral",
-    4: "transnet",
-  };
+  const map = { 1: "etenders", 2: "eskom", 3: "sanral", 4: "transnet" };
   return map[id] || "";
 }
 
-/**
- * Derive a source slug from multiple possible fields
- */
 export function getSourceSlug(row) {
-  // Try the source/publisher/buyer fields first
   const fromField = norm(row.source || row.publisher || row.buyer || "");
-  if (["eskom", "sanral", "transnet", "etenders"].includes(fromField)) {
-    return fromField;
-  }
-  
-  // Try source_id mapping
+  if (["eskom", "sanral", "transnet", "etenders"].includes(fromField)) return fromField;
   if (row.source_id) {
     const mapped = mapSourceIdToSlug(row.source_id);
     if (mapped) return mapped;
   }
-  
   return fromField;
 }
 
-/* ===================== CATEGORY HANDLING ===================== */
-
-/**
- * Convert category text to stable slug for filtering
- */
+/* ===================== CATEGORIES ===================== */
 export function categorySlug(s) {
   const n = norm(s);
   if (!n) return "";
-  
-  // Match common patterns
   if (/(construction|civil|building)/.test(n)) return "construction-civil";
   if (/distribution/.test(n)) return "distribution";
   if (/generation/.test(n)) return "generation";
@@ -147,81 +93,45 @@ export function categorySlug(s) {
   if (/(transport|fleet|vehicle)/.test(n)) return "transport-fleet";
   if (/(facilit|maintain|upkeep)/.test(n)) return "facilities-maintenance";
   if (/(electrical|energy|power)/.test(n)) return "electrical-energy";
-  
   return n;
 }
 
-/**
- * Pretty-print category name
- */
 export function prettyCategory(s) {
   if (!s || !isMeaningful(s)) return null;
   return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
 }
 
-/* ===================== STATUS & BADGES ===================== */
-
-/**
- * Build status chip info from closing date
- */
+/* ===================== STATUS / BADGES ===================== */
 export function buildStatusFromClosing(closingDate) {
   const d = parseDate(closingDate);
-  if (!d || !isFuture(d)) {
-    return { label: "Open", className: "tt-chip-soft" };
-  }
-
+  if (!d || !isFuture(d)) return { label: "Open", className: "tt-chip-soft" };
   const diffDays = (d.getTime() - Date.now()) / (1000 * 60 * 60 * 24);
-  
-  if (diffDays <= 1) {
-    return { label: "Closing today", className: "tt-chip-danger" };
-  }
-  if (diffDays <= 3) {
-    return { label: "Closing in 3 days", className: "tt-chip-warning" };
-  }
-  if (diffDays <= 7) {
-    return { label: "Closing soon", className: "tt-chip-warning" };
-  }
-  
+  if (diffDays <= 1) return { label: "Closing today", className: "tt-chip-danger" };
+  if (diffDays <= 3) return { label: "Closing in 3 days", className: "tt-chip-warning" };
+  if (diffDays <= 7) return { label: "Closing soon", className: "tt-chip-warning" };
   return { label: "Open", className: "tt-chip-soft" };
 }
-
-// Alias for consistency
 export const buildStatusChip = buildStatusFromClosing;
 
-/**
- * Small "NEW/Updated" badge based on published date
- */
 export function computeBadge(publishedAt) {
   const d = parseDate(publishedAt);
   if (!d) return null;
-  
   const diffHours = (Date.now() - d.getTime()) / (1000 * 60 * 60);
-  
   if (diffHours <= 24) return "NEW";
   if (diffHours <= 72) return "Updated";
-  
   return null;
 }
-
-// Alias for consistency
 export const buildBadge = computeBadge;
 
-/* ===================== COUNTDOWN DISPLAY ===================== */
-
-/**
- * Short countdown (d/h/m) for card display
- */
+/* ===================== COUNTDOWN ===================== */
 export function humanCountdown(closingDate) {
   const d = parseDate(closingDate);
   if (!d) return "";
-  
   const diffMs = d.getTime() - Date.now();
   if (diffMs <= 0) return "";
-  
   const mins = Math.floor(diffMs / (1000 * 60));
   const hours = Math.floor(mins / 60);
   const days = Math.floor(hours / 24);
-  
   if (days > 30) {
     const months = Math.floor(days / 30);
     const rem = days % 30;
@@ -232,86 +142,50 @@ export function humanCountdown(closingDate) {
   return `${mins}m`;
 }
 
-/**
- * Rich countdown with "Closes in" prefix
- */
 export function humanCountdownRich(closingDate) {
-  const countdown = humanCountdown(closingDate);
-  return countdown ? `Closes in ${countdown}` : "";
+  const s = humanCountdown(closingDate);
+  return s ? `Closes in ${s}` : "";
 }
 
-/**
- * Full countdown text for details page
- */
 export function humanCountdownFull(closingDate) {
   const d = parseDate(closingDate);
   if (!d) return "No closing date";
-  
   const diffMs = d.getTime() - Date.now();
   if (diffMs <= 0) return "Closed";
-  
   const mins = Math.floor(diffMs / (1000 * 60));
   const hours = Math.floor(mins / 60);
   const days = Math.floor(hours / 24);
-  
   if (days > 30) {
     const months = Math.floor(days / 30);
     const rem = days % 30;
-    return rem 
-      ? `Closes in ${months} month${months !== 1 ? 's' : ''} and ${rem} day${rem !== 1 ? 's' : ''}`
-      : `Closes in ${months} month${months !== 1 ? 's' : ''}`;
+    return rem
+      ? `Closes in ${months} month${months !== 1 ? "s" : ""} and ${rem} day${rem !== 1 ? "s" : ""}`
+      : `Closes in ${months} month${months !== 1 ? "s" : ""}`;
   }
-  if (days > 0) return `Closes in ${days} day${days !== 1 ? 's' : ''}`;
-  if (hours > 0) return `Closes in ${hours} hour${hours !== 1 ? 's' : ''}`;
-  return `Closes in ${mins} minute${mins !== 1 ? 's' : ''}`;
+  if (days > 0) return `Closes in ${days} day${days !== 1 ? "s" : ""}`;
+  if (hours > 0) return `Closes in ${hours} hour${hours !== 1 ? "s" : ""}`;
+  return `Closes in ${mins} minute${mins !== 1 ? "s" : ""}`;
 }
 
 /* ===================== DISPLAY HELPERS ===================== */
-
-/**
- * Build subline for card (buyer • location)
- */
 export function buildSubline({ buyer, location, source }) {
   const items = [];
-  
-  if (buyer && isMeaningful(buyer) && buyer !== source) {
-    items.push(buyer);
-  }
-  
-  if (location && isMeaningful(location)) {
-    items.push(location);
-  }
-  
+  if (buyer && isMeaningful(buyer) && buyer !== source) items.push(buyer);
+  if (location && isMeaningful(location)) items.push(location);
   return items.join(" • ");
 }
 
-/**
- * Compute urgency info for chips
- */
 export function computeUrgency(closingDate) {
   const d = parseDate(closingDate);
   if (!d) return { urgencyLabel: null, urgencyClass: "" };
-  
   const diffDays = (d.getTime() - Date.now()) / (1000 * 60 * 60 * 24);
-  
-  if (diffDays <= 1) {
-    return { urgencyLabel: "Closing today", urgencyClass: "tt-chip-danger" };
-  }
-  if (diffDays <= 3) {
-    return { urgencyLabel: "Closing in 3 days", urgencyClass: "tt-chip-warning" };
-  }
-  if (diffDays <= 7) {
-    return { urgencyLabel: "Closing soon", urgencyClass: "tt-chip-soft" };
-  }
-  
+  if (diffDays <= 1) return { urgencyLabel: "Closing today", urgencyClass: "tt-chip-danger" };
+  if (diffDays <= 3) return { urgencyLabel: "Closing in 3 days", urgencyClass: "tt-chip-warning" };
+  if (diffDays <= 7) return { urgencyLabel: "Closing soon", urgencyClass: "tt-chip-soft" };
   return { urgencyLabel: null, urgencyClass: "" };
 }
 
 /* ===================== SORTING ===================== */
-
-/**
- * Compare two dates for sorting
- */
 function cmpDates(a, b, dir = "asc") {
   const av = a ? a.getTime() : -Infinity;
   const bv = b ? b.getTime() : -Infinity;
@@ -319,118 +193,54 @@ function cmpDates(a, b, dir = "asc") {
   return dir === "asc" ? diff : -diff;
 }
 
-/**
- * Create a comparator function for array.sort()
- * Supports: published_at, -published_at, closing_at, -closing_at
- */
 export function makeComparator(sortKey) {
   switch (sortKey) {
     case "published_at":
-      return (a, b) => 
-        cmpDates(parseDate(a.published_at), parseDate(b.published_at), "asc");
-    
+      return (a, b) => cmpDates(parseDate(a.published_at), parseDate(b.published_at), "asc");
     case "-published_at":
-      return (a, b) => 
-        cmpDates(parseDate(a.published_at), parseDate(b.published_at), "desc");
-    
+      return (a, b) => cmpDates(parseDate(a.published_at), parseDate(b.published_at), "desc");
     case "closing_at":
-      return (a, b) => 
-        cmpDates(parseDate(a.closing_at), parseDate(b.closing_at), "asc");
-    
+      return (a, b) => cmpDates(parseDate(a.closing_at), parseDate(b.closing_at), "asc");
     case "-closing_at":
-      return (a, b) => 
-        cmpDates(parseDate(a.closing_at), parseDate(b.closing_at), "desc");
-    
-    // Default: newest first
+      return (a, b) => cmpDates(parseDate(a.closing_at), parseDate(b.closing_at), "desc");
     default:
-      return (a, b) => 
-        cmpDates(parseDate(a.published_at), parseDate(b.published_at), "desc");
+      return (a, b) => cmpDates(parseDate(a.published_at), parseDate(b.published_at), "desc");
   }
 }
 
 /* ===================== PAGINATION ===================== */
-
-/**
- * Build page number list with ellipses for pagination UI
- * @param {number} curr - Current page (1-indexed)
- * @param {number} total - Total number of pages
- * @param {object} options - { siblings: 1, boundaries: 1 }
- * @returns {Array} - Array of page numbers and "…" strings
- */
 export function buildPageList(curr, total, { siblings = 1, boundaries = 1 } = {}) {
   if (total <= 1) return [1];
-  
   const pages = [];
   const start = Math.max(2, curr - siblings);
   const end = Math.min(total - 1, curr + siblings);
-  
-  // Add first boundary pages
-  for (let i = 1; i <= Math.min(boundaries, total); i++) {
-    pages.push(i);
-  }
-  
-  // Add ellipsis if there's a gap
-  if (start > boundaries + 1) {
-    pages.push("…");
-  }
-  
-  // Add middle range
-  for (let i = start; i <= end; i++) {
-    if (!pages.includes(i)) {
-      pages.push(i);
-    }
-  }
-  
-  // Add ellipsis if there's a gap
-  if (end < total - boundaries) {
-    pages.push("…");
-  }
-  
-  // Add last boundary pages
-  for (let i = Math.max(total - boundaries + 1, 2); i <= total; i++) {
-    if (!pages.includes(i)) {
-      pages.push(i);
-    }
-  }
-  
+
+  for (let i = 1; i <= Math.min(boundaries, total); i++) pages.push(i);
+  if (start > boundaries + 1) pages.push("…");
+  for (let i = start; i <= end; i++) if (!pages.includes(i)) pages.push(i);
+  if (end < total - boundaries) pages.push("…");
+  for (let i = Math.max(total - boundaries + 1, 2); i <= total; i++)
+    if (!pages.includes(i)) pages.push(i);
+
   return pages;
 }
 
-/* ===================== FILTERING ===================== */
-
-/**
- * Apply text search filter to a tender
- */
+/* ===================== FILTERING (optional helpers) ===================== */
 export function matchesTextSearch(tender, query) {
   if (!query) return true;
-  
   const needle = norm(query);
-  const haystack = [
-    tender.title,
-    tender.buyer,
-    tender.location,
-    tender.category,
-    tender.description,
-    tender.summary,
-  ]
+  const haystack = [tender.title, tender.buyer, tender.location, tender.category, tender.description, tender.summary]
     .filter(Boolean)
     .map(norm)
     .join(" ");
-  
   return haystack.includes(needle);
 }
 
-/**
- * Apply source/publisher filter to a tender
- */
 export function matchesSource(tender, sourceSlug) {
   if (!sourceSlug) return true;
   return getSourceSlug(tender) === norm(sourceSlug);
 }
 
-/**
- * Apply category filter to a tender
- */
 export function matchesCategory(tender, categoryLabel) {
   if (!categoryLabel) return true;
   const wantedSlug = categorySlug(categoryLabel);
@@ -438,9 +248,6 @@ export function matchesCategory(tender, categoryLabel) {
   return tenderSlug === wantedSlug;
 }
 
-/**
- * Apply location filter to a tender
- */
 export function matchesLocation(tender, locationQuery) {
   if (!locationQuery) return true;
   const needle = norm(locationQuery);
@@ -448,41 +255,24 @@ export function matchesLocation(tender, locationQuery) {
   return haystack.includes(needle);
 }
 
-/**
- * Apply date range filters to a tender
- */
 export function matchesDateRange(tender, { closingAfter, closingBefore }) {
   const closing = parseDate(tender.closing_at);
   if (!closing) return false;
-  
   if (closingAfter) {
     const ca = new Date(closingAfter);
     ca.setHours(0, 0, 0, 0);
     if (closing < ca) return false;
   }
-  
   if (closingBefore) {
     const cb = new Date(closingBefore);
     cb.setHours(23, 59, 59, 999);
     if (closing > cb) return false;
   }
-  
   return true;
 }
 
-/**
- * Apply all filters to a list of tenders
- */
 export function filterTenders(tenders, filters) {
-  const {
-    q = "",
-    source = "",
-    category = "",
-    location = "",
-    closingAfter = "",
-    closingBefore = "",
-  } = filters;
-  
+  const { q = "", source = "", category = "", location = "", closingAfter = "", closingBefore = "" } = filters;
   return tenders.filter((t) => {
     if (!matchesTextSearch(t, q)) return false;
     if (!matchesSource(t, source)) return false;
@@ -494,76 +284,43 @@ export function filterTenders(tenders, filters) {
 }
 
 /* ===================== VALIDATION ===================== */
-
-/**
- * Validate that a tender object has minimum required fields
- */
 export function isValidTender(tender) {
   if (!tender) return false;
   if (!tender.title || !isMeaningful(tender.title)) return false;
-  // Optional: add more validation rules
   return true;
 }
-
-/**
- * Get tender ID (handles both id and referenceNumber)
- */
 export function getTenderId(tender) {
   return tender?.id ?? tender?.referenceNumber ?? null;
 }
 
-/* ===================== EXPORTS ===================== */
-
-// Export everything for easy imports
 export default {
-  // Text
   norm,
   isMeaningful,
-  
-  // Dates
   parseDate,
   isFuture,
   formatDate,
-  
-  // Sources
   prettySource,
   mapSourceIdToSlug,
   getSourceSlug,
-  
-  // Categories
   categorySlug,
   prettyCategory,
-  
-  // Status
   buildStatusFromClosing,
   buildStatusChip,
   computeBadge,
   buildBadge,
   computeUrgency,
-  
-  // Countdown
   humanCountdown,
   humanCountdownRich,
   humanCountdownFull,
-  
-  // Display
   buildSubline,
-  
-  // Sorting
   makeComparator,
-  
-  // Pagination
   buildPageList,
-  
-  // Filtering
   matchesTextSearch,
   matchesSource,
   matchesCategory,
   matchesLocation,
   matchesDateRange,
   filterTenders,
-  
-  // Validation
   isValidTender,
   getTenderId,
 };
