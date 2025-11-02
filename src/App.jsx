@@ -6,31 +6,27 @@ import { useAuth } from "react-oidc-context";
 import Navbar from "./components/Navbar.jsx";
 import UserPrefsSheet from "./components/UserPrefsSheet.jsx";
 
-// your pages
 import Home from "./pages/Home.jsx";
 import TendersPage from "./routes/TendersPage.jsx";
 import About from "./pages/About.jsx";
 import Contact from "./pages/Contact.jsx";
 
-// we export this so other components (later: TendersPage, TenderDetail)
-// can call useContext(PrefsContext) to read/update
 export const PrefsContext = React.createContext(null);
 
 export default function App() {
   const auth = useAuth();
 
-  // sheet open/close
   const [showPrefs, setShowPrefs] = useState(false);
 
-  // shared state that lives AS LONG AS the app is running
   const [prefs, setPrefs] = useState({
     name: "",
     location: "",
     notifications: "none",
+    categories: []
   });
-  const [savedTenders, setSavedTenders] = useState([]); // array of tender IDs
 
-  // figure out the "storage key" based on who is logged in
+  const [savedTenders, setSavedTenders] = useState([]);
+
   const storageKey = auth.isAuthenticated
     ? `tt_prefs_${auth.user?.profile?.email ?? "user"}`
     : null;
@@ -38,56 +34,78 @@ export default function App() {
     ? `tt_saved_${auth.user?.profile?.email ?? "user"}`
     : null;
 
-  // on login → load user prefs + saved tenders from localStorage
+  // ✅ Load prefs on login (DB first, then localStorage)
   useEffect(() => {
     if (!auth.isAuthenticated) {
-      // if not logged in, we can clear UI-level saved items
       setPrefs({
         name: "",
         location: "",
         notifications: "none",
+        categories: []
       });
       setSavedTenders([]);
       return;
     }
 
-    // load prefs
+    // ✅ Load from localStorage first
     if (storageKey) {
       const raw = localStorage.getItem(storageKey);
       if (raw) {
         try {
           const parsed = JSON.parse(raw);
           setPrefs((prev) => ({ ...prev, ...parsed }));
-        } catch (_) {
-          // ignore bad JSON
-        }
+        } catch (_) {}
       }
     }
 
-    // load saved tenders
     if (savedKey) {
       const rawSaved = localStorage.getItem(savedKey);
       if (rawSaved) {
         try {
           const parsed = JSON.parse(rawSaved);
-          if (Array.isArray(parsed)) {
-            setSavedTenders(parsed);
-          }
-        } catch (_) {
-          // ignore
-        }
+          if (Array.isArray(parsed)) setSavedTenders(parsed);
+        } catch (_) {}
       }
     }
+
+    // ✅ Then pull from backend database
+    async function loadBackendPrefs() {
+      try {
+        const res = await fetch(
+          `${import.meta.env.VITE_TENDER_API_URL}/user/preferences?email=${auth.user?.profile?.email}`,
+          {
+            headers: {
+              Authorization: auth.user?.access_token
+                ? `Bearer ${auth.user.access_token}`
+                : ""
+            }
+          }
+        );
+
+        const data = await res.json();
+
+        if (data) {
+          setPrefs((prev) => ({
+            ...prev,
+            location: data.location || "",
+            categories: data.categories || []
+          }));
+        }
+      } catch (err) {
+        console.error("Failed to load backend prefs", err);
+      }
+    }
+
+    loadBackendPrefs();
   }, [auth.isAuthenticated, storageKey, savedKey]);
 
-  // whenever prefs change → persist (only if logged in)
+  // ✅ Persist updates to localStorage
   useEffect(() => {
     if (auth.isAuthenticated && storageKey) {
       localStorage.setItem(storageKey, JSON.stringify(prefs));
     }
   }, [prefs, auth.isAuthenticated, storageKey]);
 
-  // whenever saved tenders change → persist
   useEffect(() => {
     if (auth.isAuthenticated && savedKey) {
       localStorage.setItem(savedKey, JSON.stringify(savedTenders));
@@ -100,7 +118,6 @@ export default function App() {
       setPrefs,
       savedTenders,
       setSavedTenders,
-      // helper: add/remove
       addSavedTender: (id) => {
         if (!id) return;
         setSavedTenders((cur) =>
@@ -111,13 +128,12 @@ export default function App() {
         if (!id) return;
         setSavedTenders((cur) => cur.filter((x) => x !== id));
       },
-      canSave: auth.isAuthenticated, // 👈 only logged in users may save
+      canSave: auth.isAuthenticated,
       openPrefs: () => setShowPrefs(true),
     }),
     [prefs, savedTenders, auth.isAuthenticated]
   );
 
-  // handle auth states
   if (auth.isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center text-slate-100 bg-tech-pro">
@@ -148,7 +164,6 @@ export default function App() {
               <Route path="/tenders" element={<TendersPage />} />
               <Route path="/about" element={<About />} />
               <Route path="/contact" element={<Contact />} />
-              {/* later: <Route path="/tenders/:id" element={<TenderDetail />} /> */}
             </Routes>
           </main>
         </div>
@@ -160,3 +175,4 @@ export default function App() {
     </PrefsContext.Provider>
   );
 }
+

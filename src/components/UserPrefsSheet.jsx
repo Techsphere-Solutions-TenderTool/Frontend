@@ -7,19 +7,10 @@ export default function UserPrefsSheet({ onClose }) {
   const auth = useAuth();
   const ctx = useContext(PrefsContext);
 
-  // if for some reason context is missing
-  if (!ctx) {
-    return null;
-  }
+  if (!ctx) return null;
 
-  const {
-    prefs,
-    setPrefs,
-    savedTenders,
-    canSave,
-  } = ctx;
+  const { prefs, setPrefs, savedTenders, canSave } = ctx;
 
-  // local draft so we don't update context on every keystroke
   const [form, setForm] = useState(prefs);
 
   useEffect(() => {
@@ -31,18 +22,58 @@ export default function UserPrefsSheet({ onClose }) {
     setForm((f) => ({ ...f, [name]: value }));
   };
 
-  const onSave = () => {
-    // push to context (this will also persist to localStorage from App.jsx)
-    setPrefs(form);
-    onClose?.();
+  const onSave = async () => {
+    if (!auth.isAuthenticated) return;
+
+    try {
+      const payload = {
+        email: auth.user?.profile?.email,
+        location: form.location,
+        categories: form.categories || []
+      };
+
+      await fetch(`${import.meta.env.VITE_TENDER_API_URL}/user/preferences`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: auth.user?.access_token
+            ? `Bearer ${auth.user.access_token}`
+            : ""
+        },
+        body: JSON.stringify(payload)
+      });
+
+      setPrefs(form);
+      onClose?.();
+      alert("Preferences saved successfully");
+    } catch (err) {
+      console.error("Failed to save prefs", err);
+      alert("Error updating preferences.");
+    }
   };
+
+  const CATEGORIES = [
+    "Construction & Civil",
+    "Distribution",
+    "Generation",
+    "Corporate",
+    "Engineering",
+    "IT & Software",
+    "Security",
+    "Cleaning & Hygiene",
+    "Medical & Healthcare",
+    "Consulting & Training",
+    "Transport & Fleet",
+    "Facilities & Maintenance",
+    "Electrical & Energy"
+  ];
 
   return (
     <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50">
       <div className="glass-panel w-full max-w-md p-5 space-y-4" style={{ "--panel-bg": 0.15 }}>
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-semibold text-slate-50">
-            Your TenderTool profile
+            Your TenderTool Profile
           </h3>
           <button
             onClick={onClose}
@@ -52,11 +83,9 @@ export default function UserPrefsSheet({ onClose }) {
           </button>
         </div>
 
-        {/* if not logged in */}
         {!auth.isAuthenticated && (
           <p className="text-sm text-amber-100/90 bg-amber-500/10 border border-amber-200/30 rounded-md px-3 py-2">
-            You are not logged in. Log in to save tenders and keep your
-            preferences.
+            You are not logged in. Log in to save tenders and keep your preferences.
           </p>
         )}
 
@@ -96,9 +125,33 @@ export default function UserPrefsSheet({ onClose }) {
               <option value="closing">Only when a tender is closing</option>
             </select>
           </label>
+
+          {/* ✅ Updated Tender Industry Categories */}
+          <div className="mt-4">
+            <label className="block text-xs uppercase text-slate-200/70 mb-1">
+              Tender Categories (choose one or more)
+            </label>
+
+            {CATEGORIES.map((cat) => (
+              <label key={cat} className="flex items-center gap-2 text-slate-200 text-sm mb-1">
+                <input
+                  type="checkbox"
+                  checked={form.categories?.includes(cat) || false}
+                  onChange={(e) => {
+                    setForm((prev) => {
+                      const current = new Set(prev.categories || []);
+                      if (e.target.checked) current.add(cat);
+                      else current.delete(cat);
+                      return { ...prev, categories: [...current] };
+                    });
+                  }}
+                />
+                {cat}
+              </label>
+            ))}
+          </div>
         </div>
 
-        {/* saved tenders overview */}
         <div className="bg-slate-900/40 rounded-lg p-3">
           <div className="flex items-center justify-between">
             <span className="text-xs uppercase text-slate-200/70">
@@ -108,15 +161,6 @@ export default function UserPrefsSheet({ onClose }) {
               {savedTenders?.length ?? 0}
             </span>
           </div>
-          <p className="text-[0.7rem] text-slate-300/60 mt-1">
-            These are stored per account. You can save from the tender list /
-            detail screen.
-          </p>
-          {!canSave && (
-            <p className="text-[0.65rem] text-amber-200/90 mt-2">
-              Log in to enable saving.
-            </p>
-          )}
         </div>
 
         <div className="flex justify-end gap-2">
@@ -127,11 +171,7 @@ export default function UserPrefsSheet({ onClose }) {
             onClick={onSave}
             className="btn btn-primary text-sm"
             disabled={!auth.isAuthenticated}
-            title={
-              auth.isAuthenticated
-                ? ""
-                : "Log in to save preferences"
-            }
+            title={auth.isAuthenticated ? "" : "Log in to save preferences"}
           >
             Save
           </button>
@@ -140,3 +180,4 @@ export default function UserPrefsSheet({ onClose }) {
     </div>
   );
 }
+
