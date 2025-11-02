@@ -8,6 +8,34 @@ import { PrefsContext } from "../App.jsx";
 
 const CLOSING_SOON_DAYS = 7; // we’ll relax to 30 if we get 0
 
+// your categories
+const CATEGORIES = [
+  "Construction & Civil",
+  "Distribution",
+  "Generation",
+  "Corporate",
+  "Engineering",
+  "IT & Software",
+  "Security",
+  "Cleaning & Hygiene",
+  "Medical & Healthcare",
+  "Consulting & Training",
+  "Transport & Fleet",
+  "Facilities & Maintenance",
+  "Electrical & Energy",
+];
+
+// pretty-print source codes coming from api.js
+function prettySource(s) {
+  if (!s) return "";
+  const low = s.toLowerCase();
+  if (low === "eskom") return "ESKOM";
+  if (low === "sanral") return "SANRAL";
+  if (low === "transnet") return "Transnet";
+  if (low === "etenders") return "National eTenders";
+  return s;
+}
+
 export default function TendersPage() {
   const navigate = useNavigate();
   const ctx = useContext(PrefsContext);
@@ -99,14 +127,73 @@ export default function TendersPage() {
         const items = data.results || data.items || [];
         const grandTotal = data.total ?? data.count ?? items.length;
 
-        let finalItems = items;
+        // =========================================================
+        // FRONTEND FALLBACK FILTERING
+        // =========================================================
+        let filtered = items;
+
+        // keyword
+        if (qDebounced) {
+          const needle = qDebounced.toLowerCase();
+          filtered = filtered.filter((t) => {
+            return (
+              (t.title && t.title.toLowerCase().includes(needle)) ||
+              (t.buyer && t.buyer.toLowerCase().includes(needle)) ||
+              (t.location && t.location.toLowerCase().includes(needle))
+            );
+          });
+        }
+
+        // source / publisher
+        if (source) {
+          filtered = filtered.filter(
+            (t) => (t.source || "").toLowerCase() === source.toLowerCase()
+          );
+        }
+
+        // category (loose match because API is messy)
+        if (category) {
+          const catLow = category.toLowerCase();
+          filtered = filtered.filter((t) =>
+            (t.category || "").toLowerCase().includes(catLow)
+          );
+        }
+
+        // location contains
+        if (location) {
+          const loc = location.toLowerCase();
+          filtered = filtered.filter((t) =>
+            (t.location || "").toLowerCase().includes(loc)
+          );
+        }
+
+        // closing date range (client side)
+        if (closingAfter) {
+          const ca = new Date(closingAfter);
+          filtered = filtered.filter((t) => {
+            if (!t.closing_at) return false;
+            return new Date(t.closing_at) >= ca;
+          });
+        }
+        if (closingBefore) {
+          const cb = new Date(closingBefore);
+          filtered = filtered.filter((t) => {
+            if (!t.closing_at) return false;
+            return new Date(t.closing_at) <= cb;
+          });
+        }
+
+        // --------------------------------------------------------
+        // then your existing logic (saved / closing view) works on `filtered`
+        // --------------------------------------------------------
+        let finalItems = filtered;
 
         // 1) saved view → client side filter
         if (view === "saved") {
           if (savedIds.length === 0) {
             finalItems = [];
           } else {
-            finalItems = items.filter((t) => {
+            finalItems = filtered.filter((t) => {
               const id = t.id ?? t.referenceNumber;
               return savedIds.includes(id);
             });
@@ -116,7 +203,7 @@ export default function TendersPage() {
         // 2) closing soon → only within 7 days (relax to 30 if none)
         if (view === "closing") {
           const now = new Date();
-          const in7 = items.filter((t) => {
+          const in7 = filtered.filter((t) => {
             if (!t.closing_at) return false;
             const d = new Date(t.closing_at);
             const diffDays = (d - now) / (1000 * 60 * 60 * 24);
@@ -126,7 +213,7 @@ export default function TendersPage() {
           if (in7.length > 0) {
             finalItems = in7;
           } else {
-            const in30 = items.filter((t) => {
+            const in30 = filtered.filter((t) => {
               if (!t.closing_at) return false;
               const d = new Date(t.closing_at);
               const diffDays = (d - now) / (1000 * 60 * 60 * 24);
@@ -136,8 +223,9 @@ export default function TendersPage() {
           }
         }
 
+        // show the filtered count, not the raw API count
         setRows(finalItems);
-        setTotal(view === "saved" ? savedIds.length : grandTotal);
+        setTotal(view === "saved" ? savedIds.length : filtered.length || grandTotal);
       } catch (e) {
         console.error(e);
         if (!alive) return;
@@ -152,7 +240,17 @@ export default function TendersPage() {
     return () => {
       alive = false;
     };
-  }, [apiFilters, view, savedIds]);
+  }, [
+    apiFilters,
+    view,
+    savedIds,
+    qDebounced,
+    source,
+    category,
+    location,
+    closingAfter,
+    closingBefore,
+  ]);
 
   // pagination info
   const startItem = (page - 1) * pageSize + 1;
@@ -253,7 +351,7 @@ export default function TendersPage() {
                 className="select"
               >
                 <option value="">All publishers</option>
-                <option value="eskom">Eskom</option>
+                <option value="eskom">ESKOM</option>
                 <option value="sanral">SANRAL</option>
                 <option value="transnet">Transnet</option>
                 <option value="etenders">National eTenders</option>
@@ -267,10 +365,11 @@ export default function TendersPage() {
                 className="select"
               >
                 <option value="">All</option>
-                <option value="GENERATION">Generation</option>
-                <option value="DISTRIBUTION">Distribution</option>
-                <option value="CONSTRUCTION">Construction</option>
-                <option value="ICT">ICT & Software</option>
+                {CATEGORIES.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
               </select>
             </div>
             <div>
@@ -356,9 +455,12 @@ export default function TendersPage() {
                   else addSaved?.(id);
                   cacheTender({ ...t, id });
                 }}
-                onView={() => {
+                onView={(openAi) => {
+                  // if openAi === true → tell details page to open the AI panel
                   cacheTender({ ...t, id });
-                  navigate(`/tenders/${id}`, { state: { row: { ...t, id } } });
+                  navigate(`/tenders/${id}`, {
+                    state: { row: { ...t, id }, openAi: !!openAi },
+                  });
                 }}
               />
             );
@@ -366,8 +468,8 @@ export default function TendersPage() {
         </div>
       )}
 
-      {/* pager (only for normal view) */}
-      {!loading && view !== "saved" && total > pageSize && (
+      {/* pager */}
+      {!loading && view !== "saved" && total > pageSize ? (
         <div className="flex items-center justify-between gap-3">
           <div className="flex gap-2">
             <button
@@ -389,7 +491,7 @@ export default function TendersPage() {
             Page {page} • {total} tenders
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -401,7 +503,7 @@ function TenderRowCard({ tender, isSaved, onSave, onView }) {
   const id = tender.id ?? tender.referenceNumber;
   const title = tender.title || "Untitled tender";
   const category = nice(tender.category);
-  const source = nice(tender.source || tender.publisher || tender.buyer);
+  const source = prettySource(tender.source || tender.publisher || tender.buyer);
   const buyer = nice(tender.buyer);
   const location = nice(tender.location);
   const published = tender.published_at ? new Date(tender.published_at) : null;
@@ -459,15 +561,19 @@ function TenderRowCard({ tender, isSaved, onSave, onView }) {
       </div>
 
       {/* action */}
-      <div className="tender-actions-nice mt-3">
-        <button onClick={onView} className="btn btn-primary glow-cta">
+      <div className="tender-actions-nice mt-3 flex flex-col gap-2 sm:flex-row">
+        <button onClick={() => onView(false)} className="btn btn-primary glow-cta">
           View details
+        </button>
+        <button onClick={() => onView(true)} className="btn btn-secondary sm:ml-2">
+          AI summaries
         </button>
       </div>
     </article>
   );
 }
 
+// -------------------------------------------
 function nice(v) {
   if (!v) return "";
   const s = String(v).trim();
