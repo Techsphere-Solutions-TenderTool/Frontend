@@ -4,8 +4,9 @@ import { useNavigate } from "react-router-dom";
 import { MapPin, CalendarDays, Clock4 } from "lucide-react";
 import { listTenders, cacheTender } from "../lib/api.js";
 import useDebouncedValue from "../hooks/useDebouncedValue.js";
+import { PrefsContext } from "../contexts/PrefsContext.js";
 
-import { PrefsContext } from "../App.jsx";
+
 
 /* ===================== CONFIG ===================== */
 

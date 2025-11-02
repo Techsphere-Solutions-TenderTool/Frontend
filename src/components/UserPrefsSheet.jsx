@@ -1,21 +1,28 @@
 // src/components/UserPrefsSheet.jsx
-import React, { useContext, useState, useEffect } from "react";
-import { PrefsContext } from "../App.jsx";
+import React, { useContext, useEffect, useMemo, useState } from "react";
+import { PrefsContext } from "../contexts/PrefsContext.js";
 import { useAuth } from "react-oidc-context";
 
 export default function UserPrefsSheet({ onClose }) {
   const auth = useAuth();
+
+  // Hooks must always be called – even if context is missing.
   const ctx = useContext(PrefsContext);
 
-  if (!ctx) return null;
-
-  const { prefs, setPrefs, savedTenders } = ctx;
-
-  const [form, setForm] = useState(prefs);
+  // Form state + ui state (declared unconditionally at top)
+  const [form, setForm] = useState(
+    ctx?.prefs ?? { name: "", location: "", notifications: "none", categories: [] }
+  );
   const [saving, setSaving] = useState(false);
   const [successMsg, setSuccessMsg] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
 
+  // If context wasn’t provided, render nothing (hooks above already executed)
+  if (!ctx) return null;
+
+  const { prefs, setPrefs, savedTenders } = ctx;
+
+  // Keep form in sync with global prefs
   useEffect(() => {
     setForm(prefs);
   }, [prefs]);
@@ -44,21 +51,27 @@ export default function UserPrefsSheet({ onClose }) {
         categories: form.categories || [],
       };
 
-      await fetch(`${import.meta.env.VITE_TENDER_API_URL}/user/preferences`, {
+      const res = await fetch(`${import.meta.env.VITE_TENDER_API_URL}/user/preferences`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: auth.user?.access_token
-            ? `Bearer ${auth.user.access_token}`
-            : "",
+          Authorization: auth.user?.access_token ? `Bearer ${auth.user.access_token}` : "",
         },
         body: JSON.stringify(payload),
       });
 
+      if (!res.ok) {
+        // surface a friendly error but keep CI happy
+        setSaving(false);
+        setErrorMsg("Server rejected the update. Please try again.");
+        return;
+        // (no throw so we don't hit the catch with same message)
+      }
+
       // update global ctx
       setPrefs(form);
 
-      // show inline success instead of browser alert
+      // inline success
       setSuccessMsg("Preferences saved successfully ✅");
       setSaving(false);
 
@@ -74,21 +87,25 @@ export default function UserPrefsSheet({ onClose }) {
     }
   };
 
-  const CATEGORIES = [
-    "Construction & Civil",
-    "Distribution",
-    "Generation",
-    "Corporate",
-    "Engineering",
-    "IT & Software",
-    "Security",
-    "Cleaning & Hygiene",
-    "Medical & Healthcare",
-    "Consulting & Training",
-    "Transport & Fleet",
-    "Facilities & Maintenance",
-    "Electrical & Energy",
-  ];
+  // memoize list so it isn’t re-created every render
+  const CATEGORIES = useMemo(
+    () => [
+      "Construction & Civil",
+      "Distribution",
+      "Generation",
+      "Corporate",
+      "Engineering",
+      "IT & Software",
+      "Security",
+      "Cleaning & Hygiene",
+      "Medical & Healthcare",
+      "Consulting & Training",
+      "Transport & Fleet",
+      "Facilities & Maintenance",
+      "Electrical & Energy",
+    ],
+    []
+  );
 
   return (
     <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 px-3">
@@ -100,18 +117,13 @@ export default function UserPrefsSheet({ onClose }) {
         {/* header */}
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h3 className="text-xl font-semibold text-slate-50">
-              Your TenderTool Profile
-            </h3>
+            <h3 className="text-xl font-semibold text-slate-50">Your TenderTool Profile</h3>
             <p className="text-slate-200/60 text-sm mt-1">
-              Tell us what province and categories you care about and we’ll show you
-              the right tenders.
+              Tell us what province and categories you care about and we’ll show you the right
+              tenders.
             </p>
           </div>
-          <button
-            onClick={onClose}
-            className="text-slate-200 hover:text-white text-lg leading-none"
-          >
+          <button onClick={onClose} className="text-slate-200 hover:text-white text-lg leading-none">
             ✕
           </button>
         </div>
@@ -178,9 +190,7 @@ export default function UserPrefsSheet({ onClose }) {
             {/* saved tenders box */}
             <div className="bg-slate-900/40 rounded-lg p-3 mt-3">
               <div className="flex items-center justify-between">
-                <span className="text-xs uppercase text-slate-200/70">
-                  Saved tenders
-                </span>
+                <span className="text-xs uppercase text-slate-200/70">Saved tenders</span>
                 <span className="text-sm font-semibold text-slate-50">
                   {savedTenders?.length ?? 0}
                 </span>
@@ -198,10 +208,7 @@ export default function UserPrefsSheet({ onClose }) {
             <div className="max-h-60 overflow-y-auto pr-2 space-y-1">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-1">
                 {CATEGORIES.map((cat) => (
-                  <label
-                    key={cat}
-                    className="flex items-center gap-2 text-slate-200 text-sm"
-                  >
+                  <label key={cat} className="flex items-center gap-2 text-slate-200 text-sm">
                     <input
                       type="checkbox"
                       className="accent-cyan-400"

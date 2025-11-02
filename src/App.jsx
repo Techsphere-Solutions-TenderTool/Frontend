@@ -11,14 +11,11 @@ import TendersPage from "./routes/TendersPage.jsx";
 import About from "./pages/About.jsx";
 import Contact from "./pages/Contact.jsx";
 
-
-export const PrefsContext = React.createContext(null);
+// ⬅️ context is now in its own file (fixes react-refresh rule)
+import { PrefsContext } from "./contexts/PrefsContext.js";
 
 export default function App() {
   const auth = useAuth();
-const COGNITO_POOL_ID   = import.meta.env.VITE_COGNITO_POOL_ID;
-const CLIENT_ID         = import.meta.env.VITE_COGNITO_CLIENT_ID;
-const REDIRECT_URI      = import.meta.env.VITE_REDIRECT_URI;
 
   const [showPrefs, setShowPrefs] = useState(false);
 
@@ -31,14 +28,13 @@ const REDIRECT_URI      = import.meta.env.VITE_REDIRECT_URI;
 
   const [savedTenders, setSavedTenders] = useState([]);
 
-  const storageKey = auth.isAuthenticated
-    ? `tt_prefs_${auth.user?.profile?.email ?? "user"}`
-    : null;
-  const savedKey = auth.isAuthenticated
-    ? `tt_saved_${auth.user?.profile?.email ?? "user"}`
-    : null;
+  const email = auth.user?.profile?.email ?? "user";
+  const accessToken = auth.user?.access_token ?? "";
 
-  // ✅ Load prefs on login (DB first, then localStorage)
+  const storageKey = auth.isAuthenticated ? `tt_prefs_${email}` : null;
+  const savedKey = auth.isAuthenticated ? `tt_saved_${email}` : null;
+
+  // Load prefs & saved tenders (localStorage first, then backend)
   useEffect(() => {
     if (!auth.isAuthenticated) {
       setPrefs({
@@ -51,48 +47,57 @@ const REDIRECT_URI      = import.meta.env.VITE_REDIRECT_URI;
       return;
     }
 
-    // ✅ Load from localStorage first
+    // localStorage → prefs
     if (storageKey) {
       const raw = localStorage.getItem(storageKey);
       if (raw) {
         try {
           const parsed = JSON.parse(raw);
           setPrefs((prev) => ({ ...prev, ...parsed }));
-        } catch (_) {}
+        } catch (err) {
+          console.warn("Failed to parse local prefs", err);
+        }
       }
     }
 
+    // localStorage → saved tenders
     if (savedKey) {
       const rawSaved = localStorage.getItem(savedKey);
       if (rawSaved) {
         try {
           const parsed = JSON.parse(rawSaved);
           if (Array.isArray(parsed)) setSavedTenders(parsed);
-        } catch (_) {}
+        } catch (err) {
+          console.warn("Failed to parse saved tenders", err);
+        }
       }
     }
 
-    // ✅ Then pull from backend database
+    // backend → prefs
     async function loadBackendPrefs() {
       try {
         const res = await fetch(
-          `${import.meta.env.VITE_TENDER_API_URL}/user/preferences?email=${auth.user?.profile?.email}`,
+          `${import.meta.env.VITE_TENDER_API_URL}/user/preferences?email=${email}`,
           {
             headers: {
-              Authorization: auth.user?.access_token
-                ? `Bearer ${auth.user.access_token}`
-                : ""
-            }
+              Authorization: accessToken ? `Bearer ${accessToken}` : "",
+            },
           }
         );
 
-        const data = await res.json();
+        // tolerate non-200s
+        if (!res.ok) {
+          // optional soft warning; not a failure
+          console.warn("Backend prefs request not OK:", res.status);
+          return;
+        }
 
+        const data = await res.json();
         if (data) {
           setPrefs((prev) => ({
             ...prev,
             location: data.location || "",
-            categories: data.categories || []
+            categories: data.categories || [],
           }));
         }
       } catch (err) {
@@ -101,18 +106,33 @@ const REDIRECT_URI      = import.meta.env.VITE_REDIRECT_URI;
     }
 
     loadBackendPrefs();
-  }, [auth.isAuthenticated, storageKey, savedKey]);
+  }, [
+    auth.isAuthenticated,
+    storageKey,
+    savedKey,
+    email,         // include used values in deps
+    accessToken,   // include used values in deps
+  ]);
 
-  // ✅ Persist updates to localStorage
+  // Persist prefs to localStorage
   useEffect(() => {
     if (auth.isAuthenticated && storageKey) {
-      localStorage.setItem(storageKey, JSON.stringify(prefs));
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(prefs));
+      } catch (err) {
+        console.error("Failed to persist prefs", err);
+      }
     }
   }, [prefs, auth.isAuthenticated, storageKey]);
 
+  // Persist saved tenders to localStorage
   useEffect(() => {
     if (auth.isAuthenticated && savedKey) {
-      localStorage.setItem(savedKey, JSON.stringify(savedTenders));
+      try {
+        localStorage.setItem(savedKey, JSON.stringify(savedTenders));
+      } catch (err) {
+        console.error("Failed to persist saved tenders", err);
+      }
     }
   }, [savedTenders, auth.isAuthenticated, savedKey]);
 
@@ -124,9 +144,7 @@ const REDIRECT_URI      = import.meta.env.VITE_REDIRECT_URI;
       setSavedTenders,
       addSavedTender: (id) => {
         if (!id) return;
-        setSavedTenders((cur) =>
-          cur.includes(id) ? cur : [...cur, id]
-        );
+        setSavedTenders((cur) => (cur.includes(id) ? cur : [...cur, id]));
       },
       removeSavedTender: (id) => {
         if (!id) return;
@@ -173,11 +191,8 @@ const REDIRECT_URI      = import.meta.env.VITE_REDIRECT_URI;
           </main>
         </div>
 
-        {showPrefs && (
-          <UserPrefsSheet onClose={() => setShowPrefs(false)} />
-        )}
+        {showPrefs && <UserPrefsSheet onClose={() => setShowPrefs(false)} />}
       </BrowserRouter>
     </PrefsContext.Provider>
   );
 }
-

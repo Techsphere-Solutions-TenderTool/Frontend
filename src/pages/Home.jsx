@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import { useAuth } from "react-oidc-context";
 import { listTenders } from "../lib/api";
 import { MapPin, CalendarDays, Clock4, Star } from "lucide-react";
-import { PrefsContext } from "../App.jsx";;
+import { PrefsContext } from "../contexts/PrefsContext.js";
 
 
 export default function Home() {

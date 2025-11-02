@@ -18,35 +18,6 @@ const CATEGORIES = [
   "Electrical & Energy",
 ];
 
-// Normalization + category slugging to match TendersPage filtering
-const norm = (v) =>
-  String(v || "")
-    .normalize("NFKD")
-    .toLowerCase()
-    .replace(/&/g, " and ")
-    .replace(/[^\w\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-function categorySlug(s) {
-  const n = norm(s);
-  if (!n) return "";
-  if (/(construction|civil)/.test(n)) return "construction-civil";
-  if (/distribution/.test(n)) return "distribution";
-  if (/generation/.test(n)) return "generation";
-  if (/corporate/.test(n)) return "corporate";
-  if (/engineering/.test(n)) return "engineering";
-  if (/(it|software)/.test(n)) return "it-software";
-  if (/security/.test(n)) return "security";
-  if (/(clean|hygiene)/.test(n)) return "cleaning-hygiene";
-  if (/(medical|health)/.test(n)) return "medical-healthcare";
-  if (/(consult|training)/.test(n)) return "consulting-training";
-  if (/(transport|fleet)/.test(n)) return "transport-fleet";
-  if (/(facilit|maintain)/.test(n)) return "facilities-maintenance";
-  if (/(electrical|energy)/.test(n)) return "electrical-energy";
-  return n;
-}
-
 /**
  * TenderFilters
  * Props:
@@ -74,11 +45,9 @@ export default function TenderFilters({ value, onChange, defaults }) {
 
   const upd = (patch) => onChange({ ...value, ...patch });
 
-  // Category select options use display labels, but we keep comparison stable by storing the label,
-  // and letting TendersPage convert to slug during filtering (same as there).
+  // Category select stores the display label; TendersPage handles slug matching.
   const handleCategory = (e) => {
     const label = e.target.value;
-    // keep label in state; server/client filtering in TendersPage handles slug
     upd({ category: label, page: 1 });
   };
 

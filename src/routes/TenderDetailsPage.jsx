@@ -9,7 +9,8 @@ import {
   cacheTender,
   summariseTender,
 } from "../lib/api.js";
-import { PrefsContext } from "../App.jsx";
+import { PrefsContext } from "../contexts/PrefsContext.js";
+
 
 function sourceFromId(id) {
   if (!id) return "";
