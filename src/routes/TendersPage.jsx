@@ -4,11 +4,15 @@ import { useNavigate } from "react-router-dom";
 import { MapPin, CalendarDays, Clock4 } from "lucide-react";
 import { listTenders, cacheTender } from "../lib/api.js";
 import useDebouncedValue from "../hooks/useDebouncedValue.js";
+
 import { PrefsContext } from "../App.jsx";
 
-const CLOSING_SOON_DAYS = 7; // we’ll relax to 30 if we get 0
+/* ===================== CONFIG ===================== */
 
-// your categories
+// If your API emits numeric source_id, map to slugs
+const SOURCE_ID_MAP = { 1: "etenders", 2: "eskom", 3: "sanral", 4: "transnet" };
+
+// Categories shown to users (labels)
 const CATEGORIES = [
   "Construction & Civil",
   "Distribution",
@@ -25,16 +29,103 @@ const CATEGORIES = [
   "Electrical & Energy",
 ];
 
-// pretty-print source codes coming from api.js
+// When applying client-side filters, fetch a larger chunk to filter locally
+const FETCH_CHUNK = 400;
+
+/* ===================== TEXT/DATE HELPERS ===================== */
+
+const norm = (v) =>
+  String(v || "")
+    .normalize("NFKD")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+function parseDate(d) {
+  const t = d ? new Date(d) : null;
+  return t && !isNaN(t.getTime()) ? t : null;
+}
+
 function prettySource(s) {
   if (!s) return "";
-  const low = s.toLowerCase();
+  const low = String(s).toLowerCase();
   if (low === "eskom") return "ESKOM";
   if (low === "sanral") return "SANRAL";
   if (low === "transnet") return "Transnet";
   if (low === "etenders") return "National eTenders";
   return s;
 }
+
+// Turn any category text (any case / formatting) into a stable slug
+function categorySlug(s) {
+  const n = norm(s);
+  if (!n) return "";
+  if (/(construction|civil)/.test(n)) return "construction-civil";
+  if (/distribution/.test(n)) return "distribution";
+  if (/generation/.test(n)) return "generation";
+  if (/corporate/.test(n)) return "corporate";
+  if (/engineering/.test(n)) return "engineering";
+  if (/(it|software)/.test(n)) return "it-software";
+  if (/security/.test(n)) return "security";
+  if (/(clean|hygiene)/.test(n)) return "cleaning-hygiene";
+  if (/(medical|health)/.test(n)) return "medical-healthcare";
+  if (/(consult|training)/.test(n)) return "consulting-training";
+  if (/(transport|fleet)/.test(n)) return "transport-fleet";
+  if (/(facilit|maintain)/.test(n)) return "facilities-maintenance";
+  if (/(electrical|energy)/.test(n)) return "electrical-energy";
+  return n; // fallback
+}
+
+function getSourceSlug(row) {
+  const fromField = norm(row.source || row.publisher || row.buyer);
+  if (["eskom", "sanral", "transnet", "etenders"].includes(fromField)) return fromField;
+  const viaId = SOURCE_ID_MAP[row.source_id] || "";
+  return norm(viaId);
+}
+
+/* ===================== SORT HELPERS ===================== */
+
+function cmpDates(a, b, dir = "asc") {
+  const av = a ? a.getTime() : -Infinity;
+  const bv = b ? b.getTime() : -Infinity;
+  const diff = av - bv;
+  return dir === "asc" ? diff : -diff;
+}
+
+function makeComparator(sortKey) {
+  switch (sortKey) {
+    case "published_at":
+      return (a, b) => cmpDates(parseDate(a.published_at), parseDate(b.published_at), "asc");
+    case "-published_at":
+      return (a, b) => cmpDates(parseDate(a.published_at), parseDate(b.published_at), "desc");
+    case "closing_at":
+      return (a, b) => cmpDates(parseDate(a.closing_at), parseDate(b.closing_at), "asc");
+    case "-closing_at":
+      return (a, b) => cmpDates(parseDate(a.closing_at), parseDate(b.closing_at), "desc");
+    default:
+      return (a, b) => cmpDates(parseDate(a.published_at), parseDate(b.published_at), "desc");
+  }
+}
+
+/* ===================== PAGER HELPERS ===================== */
+
+function buildPageList(curr, total, { siblings = 1, boundaries = 1 } = {}) {
+  const pages = [];
+  const start = Math.max(2, curr - siblings);
+  const end = Math.min(total - 1, curr + siblings);
+  for (let i = 1; i <= Math.min(boundaries, total); i++) pages.push(i);
+  if (start > boundaries + 1) pages.push("…");
+  for (let i = start; i <= end; i++) pages.push(i);
+  if (end < total - boundaries) pages.push("…");
+  for (let i = Math.max(total - boundaries + 1, 1); i <= total; i++) {
+    if (!pages.includes(i)) pages.push(i);
+  }
+  return pages.filter((p) => p >= 1 && p <= total);
+}
+
+/* ===================== PAGE ===================== */
 
 export default function TendersPage() {
   const navigate = useNavigate();
@@ -50,7 +141,7 @@ export default function TendersPage() {
   const [total, setTotal] = useState(0);
 
   // UI state
-  const [view, setView] = useState("all"); // all | saved | closing
+  const [view, setView] = useState("all"); // "all" | "saved"
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   // filters
@@ -62,7 +153,7 @@ export default function TendersPage() {
   const [closingAfter, setClosingAfter] = useState("");
   const [closingBefore, setClosingBefore] = useState("");
 
-  // paging
+  // paging + sort
   const [page, setPage] = useState(1);
   const [pageSize] = useState(20);
   const [sort, setSort] = useState("-published_at");
@@ -71,51 +162,31 @@ export default function TendersPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // when filters change → go to first page
+  // jump to first page whenever filters/view/sort change
   useEffect(() => {
     setPage(1);
   }, [qDebounced, source, category, location, closingAfter, closingBefore, sort, view]);
 
-  // build filters to send to API
+  // Are we doing client-side filters?
+  const clientFiltersActive =
+    !!source || !!category || !!location || !!closingAfter || !!closingBefore;
+
+  // Build the request for the API:
+  // - Always send q + sort so backend can help reduce volume
+  // - NEVER send category/source/location/date range → we handle locally
   const apiFilters = useMemo(() => {
     const f = {
-      page,
-      pageSize,
+      page: clientFiltersActive ? 1 : page,
+      pageSize: clientFiltersActive ? FETCH_CHUNK : pageSize,
       q: qDebounced,
       sort,
     };
-
-    if (source) f.source = source;
-    if (category) f.category = category;
-    if (location) f.location = location;
-    if (closingAfter) f.closing_after = closingAfter;
-    if (closingBefore) f.closing_before = closingBefore;
-
-    // for closing we’ll sort on closing_at
-    if (view === "closing") {
-      f.sort = "closing_at";
-      // we want more to filter client-side
-      f.pageSize = 60;
-    }
-
     return f;
-  }, [
-    page,
-    pageSize,
-    qDebounced,
-    sort,
-    source,
-    category,
-    location,
-    closingAfter,
-    closingBefore,
-    view,
-  ]);
+  }, [clientFiltersActive, page, pageSize, qDebounced, sort]);
 
-  // fetch
+  // fetch + client filtering/sorting/paging
   useEffect(() => {
     let alive = true;
-
     (async () => {
       try {
         setLoading(true);
@@ -127,105 +198,81 @@ export default function TendersPage() {
         const items = data.results || data.items || [];
         const grandTotal = data.total ?? data.count ?? items.length;
 
-        // =========================================================
-        // FRONTEND FALLBACK FILTERING
-        // =========================================================
+        // ---- client-side filters ----
         let filtered = items;
 
         // keyword
         if (qDebounced) {
-          const needle = qDebounced.toLowerCase();
-          filtered = filtered.filter((t) => {
-            return (
-              (t.title && t.title.toLowerCase().includes(needle)) ||
-              (t.buyer && t.buyer.toLowerCase().includes(needle)) ||
-              (t.location && t.location.toLowerCase().includes(needle))
-            );
-          });
-        }
-
-        // source / publisher
-        if (source) {
+          const needle = norm(qDebounced);
           filtered = filtered.filter(
-            (t) => (t.source || "").toLowerCase() === source.toLowerCase()
+            (t) =>
+              norm(t.title).includes(needle) ||
+              norm(t.buyer).includes(needle) ||
+              norm(t.location).includes(needle)
           );
         }
 
-        // category (loose match because API is messy)
+        // publisher
+        if (source) {
+          const wanted = norm(source);
+          filtered = filtered.filter((t) => getSourceSlug(t) === wanted);
+        }
+
+        // category (robust to ANY casing/format)
         if (category) {
-          const catLow = category.toLowerCase();
-          filtered = filtered.filter((t) =>
-            (t.category || "").toLowerCase().includes(catLow)
-          );
+          const wanted = categorySlug(category);
+          filtered = filtered.filter((t) => categorySlug(t.category) === wanted);
         }
 
-        // location contains
+        // location contains (case-insensitive)
         if (location) {
-          const loc = location.toLowerCase();
-          filtered = filtered.filter((t) =>
-            (t.location || "").toLowerCase().includes(loc)
-          );
+          const loc = norm(location);
+          filtered = filtered.filter((t) => norm(t.location).includes(loc));
         }
 
-        // closing date range (client side)
+        // closing date range (inclusive)
         if (closingAfter) {
           const ca = new Date(closingAfter);
+          ca.setHours(0, 0, 0, 0);
           filtered = filtered.filter((t) => {
-            if (!t.closing_at) return false;
-            return new Date(t.closing_at) >= ca;
+            const d = parseDate(t.closing_at);
+            return !!d && d >= ca;
           });
         }
         if (closingBefore) {
           const cb = new Date(closingBefore);
+          cb.setHours(23, 59, 59, 999);
           filtered = filtered.filter((t) => {
-            if (!t.closing_at) return false;
-            return new Date(t.closing_at) <= cb;
+            const d = parseDate(t.closing_at);
+            return !!d && d <= cb;
           });
         }
 
-        // --------------------------------------------------------
-        // then your existing logic (saved / closing view) works on `filtered`
-        // --------------------------------------------------------
-        let finalItems = filtered;
+        // favourites view
+        let finalItems =
+          view === "saved"
+            ? savedIds.length === 0
+              ? []
+              : filtered.filter((t) => {
+                  const id = t.id ?? t.referenceNumber;
+                  return savedIds.includes(id);
+                })
+            : filtered;
 
-        // 1) saved view → client side filter
-        if (view === "saved") {
-          if (savedIds.length === 0) {
-            finalItems = [];
-          } else {
-            finalItems = filtered.filter((t) => {
-              const id = t.id ?? t.referenceNumber;
-              return savedIds.includes(id);
-            });
-          }
-        }
+        // guarantee sort
+        finalItems.sort(makeComparator(sort));
 
-        // 2) closing soon → only within 7 days (relax to 30 if none)
-        if (view === "closing") {
-          const now = new Date();
-          const in7 = filtered.filter((t) => {
-            if (!t.closing_at) return false;
-            const d = new Date(t.closing_at);
-            const diffDays = (d - now) / (1000 * 60 * 60 * 24);
-            return diffDays >= 0 && diffDays <= CLOSING_SOON_DAYS;
-          });
+        // totals & slicing
+        const hasClientFilters = clientFiltersActive || view === "saved" || !!qDebounced;
+        const totalForPager = hasClientFilters ? finalItems.length : grandTotal;
 
-          if (in7.length > 0) {
-            finalItems = in7;
-          } else {
-            const in30 = filtered.filter((t) => {
-              if (!t.closing_at) return false;
-              const d = new Date(t.closing_at);
-              const diffDays = (d - now) / (1000 * 60 * 60 * 24);
-              return diffDays >= 0 && diffDays <= 30;
-            });
-            finalItems = in30;
-          }
-        }
+        const start = (page - 1) * pageSize;
+        const end = start + pageSize;
+        const visibleRows = hasClientFilters ? finalItems.slice(start, end) : finalItems;
 
-        // show the filtered count, not the raw API count
-        setRows(finalItems);
-        setTotal(view === "saved" ? savedIds.length : filtered.length || grandTotal);
+        if (!alive) return;
+        setRows(visibleRows);
+        setTotal(totalForPager);
       } catch (e) {
         console.error(e);
         if (!alive) return;
@@ -236,7 +283,6 @@ export default function TendersPage() {
         if (alive) setLoading(false);
       }
     })();
-
     return () => {
       alive = false;
     };
@@ -244,17 +290,23 @@ export default function TendersPage() {
     apiFilters,
     view,
     savedIds,
+    clientFiltersActive,
     qDebounced,
     source,
     category,
     location,
     closingAfter,
     closingBefore,
+    sort,
+    page,
+    pageSize,
   ]);
 
   // pagination info
   const startItem = (page - 1) * pageSize + 1;
   const endItem = Math.min(page * pageSize, total || 0);
+  const pageCount = Math.max(1, Math.ceil((total || 0) / pageSize));
+  const pages = buildPageList(page, pageCount, { siblings: 1, boundaries: 1 });
 
   // helpers
   const clearFilters = () => {
@@ -275,7 +327,7 @@ export default function TendersPage() {
       <div>
         <h1 className="text-2xl md:text-3xl font-bold text-slate-50">South African tenders</h1>
         <p className="text-slate-200/70 mt-1">
-          Browse, filter, and save tenders. Switch to <strong>Saved</strong> to see only yours.
+          Browse, filter, and save tenders. Switch to <strong>Favourites</strong> to see only yours.
         </p>
       </div>
 
@@ -283,23 +335,11 @@ export default function TendersPage() {
       <div className="glass-panel p-4 space-y-3" style={{ "--panel-bg": 0.03 }}>
         {/* tabs */}
         <div className="tender-tabs">
-          <button
-            onClick={() => setView("all")}
-            className={view === "all" ? "is-active" : ""}
-          >
+          <button onClick={() => setView("all")} className={view === "all" ? "is-active" : ""}>
             All
           </button>
-          <button
-            onClick={() => setView("saved")}
-            className={view === "saved" ? "is-active" : ""}
-          >
-            Saved
-          </button>
-          <button
-            onClick={() => setView("closing")}
-            className={view === "closing" ? "is-active" : ""}
-          >
-            Closing soon
+          <button onClick={() => setView("saved")} className={view === "saved" ? "is-active" : ""}>
+            Favourites
           </button>
         </div>
 
@@ -311,11 +351,7 @@ export default function TendersPage() {
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
-          <select
-            className="select md:w-40"
-            value={sort}
-            onChange={(e) => setSort(e.target.value)}
-          >
+          <select className="select md:w-40" value={sort} onChange={(e) => setSort(e.target.value)}>
             <option value="-published_at">Newest</option>
             <option value="published_at">Oldest</option>
             <option value="closing_at">Closing soonest</option>
@@ -328,12 +364,7 @@ export default function TendersPage() {
           >
             {showAdvanced ? "Hide filters" : "Advanced filters"}
           </button>
-          {(qDebounced ||
-            source ||
-            category ||
-            location ||
-            closingAfter ||
-            closingBefore) && (
+          {(qDebounced || source || category || location || closingAfter || closingBefore) && (
             <button className="btn text-sm" type="button" onClick={clearFilters}>
               Clear
             </button>
@@ -345,11 +376,7 @@ export default function TendersPage() {
           <div className="advanced-filter-panel">
             <div>
               <label>Publisher</label>
-              <select
-                value={source}
-                onChange={(e) => setSource(e.target.value)}
-                className="select"
-              >
+              <select value={source} onChange={(e) => setSource(e.target.value)} className="select">
                 <option value="">All publishers</option>
                 <option value="eskom">ESKOM</option>
                 <option value="sanral">SANRAL</option>
@@ -359,11 +386,7 @@ export default function TendersPage() {
             </div>
             <div>
               <label>Category</label>
-              <select
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                className="select"
-              >
+              <select value={category} onChange={(e) => setCategory(e.target.value)} className="select">
                 <option value="">All</option>
                 {CATEGORIES.map((c) => (
                   <option key={c} value={c}>
@@ -407,9 +430,9 @@ export default function TendersPage() {
       <div className="text-sm text-slate-200/65">
         {view === "saved" ? (
           isSavedViewEmpty ? (
-            <>You haven’t saved any tenders yet. ⭐ Save from Home or All.</>
+            <>You haven’t favourited any tenders yet. ⭐ Add some first.</>
           ) : (
-            <>Showing your saved tenders ({savedIds.length})</>
+            <>Showing your favourites ({savedIds.length})</>
           )
         ) : total ? (
           <>
@@ -430,17 +453,16 @@ export default function TendersPage() {
 
       {loading ? (
         <div className="text-slate-200/70 py-10 text-center">Loading tenders…</div>
-      ) : isSavedViewEmpty ? (
+      ) : view === "saved" && isSavedViewEmpty ? (
         <div className="glass-panel p-6 text-center text-slate-100/70">
-          ⭐ You haven’t saved anything yet. Go to <strong>All</strong>, click the star on a tender,
-          then come back.
+          ⭐ You haven’t favourited anything yet. Go to <strong>All</strong>, click the star on a
+          tender, then come back.
         </div>
       ) : (
         <div className="tender-grid">
           {rows.map((t) => {
             const id = t.id ?? t.referenceNumber;
             const isSaved = savedIds.includes(id);
-
             return (
               <TenderRowCard
                 key={id}
@@ -448,7 +470,7 @@ export default function TendersPage() {
                 isSaved={isSaved}
                 onSave={() => {
                   if (!canSave) {
-                    alert("Login to save this tender.");
+                    alert("Login to add favourites.");
                     return;
                   }
                   if (isSaved) removeSaved?.(id);
@@ -456,7 +478,6 @@ export default function TendersPage() {
                   cacheTender({ ...t, id });
                 }}
                 onView={(openAi) => {
-                  // if openAi === true → tell details page to open the AI panel
                   cacheTender({ ...t, id });
                   navigate(`/tenders/${id}`, {
                     state: { row: { ...t, id }, openAi: !!openAi },
@@ -468,9 +489,9 @@ export default function TendersPage() {
         </div>
       )}
 
-      {/* pager */}
+      {/* numbered pager */}
       {!loading && view !== "saved" && total > pageSize ? (
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center justify-between gap-3 pt-2">
           <div className="flex gap-2">
             <button
               className="btn btn-outline ts text-sm"
@@ -479,16 +500,34 @@ export default function TendersPage() {
             >
               Prev
             </button>
+
+            {pages.map((p, i) =>
+              p === "…" ? (
+                <span key={`ellipsis-${i}`} className="px-2 text-slate-400">
+                  …
+                </span>
+              ) : (
+                <button
+                  key={p}
+                  className={`btn btn-outline ts text-sm ${p === page ? "btn-active" : ""}`}
+                  onClick={() => setPage(p)}
+                >
+                  {p}
+                </button>
+              )
+            )}
+
             <button
               className="btn btn-outline ts text-sm"
-              onClick={() => setPage((p) => p + 1)}
-              disabled={endItem >= total}
+              onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+              disabled={page >= pageCount}
             >
               Next
             </button>
           </div>
+
           <div className="text-xs text-slate-200/45">
-            Page {page} • {total} tenders
+            Page {page} / {pageCount} • {total} tenders
           </div>
         </div>
       ) : null}
@@ -496,18 +535,19 @@ export default function TendersPage() {
   );
 }
 
-/* =========================================================
-   CARD (same energy as Home)
-   ========================================================= */
+/* ========================= CARD ========================= */
+
 function TenderRowCard({ tender, isSaved, onSave, onView }) {
   const id = tender.id ?? tender.referenceNumber;
   const title = tender.title || "Untitled tender";
   const category = nice(tender.category);
-  const source = prettySource(tender.source || tender.publisher || tender.buyer);
+  const source = prettySource(
+    tender.source || tender.publisher || tender.buyer || SOURCE_ID_MAP[tender.source_id]
+  );
   const buyer = nice(tender.buyer);
   const location = nice(tender.location);
-  const published = tender.published_at ? new Date(tender.published_at) : null;
-  const closing = tender.closing_at ? new Date(tender.closing_at) : null;
+  const published = parseDate(tender.published_at);
+  const closing = parseDate(tender.closing_at);
 
   const status = buildStatus(closing);
 
@@ -517,7 +557,7 @@ function TenderRowCard({ tender, isSaved, onSave, onView }) {
       <button
         onClick={onSave}
         className={`save-btn ${isSaved ? "is-saved" : ""} absolute top-3 right-3`}
-        title={isSaved ? "Unsave tender" : "Save tender"}
+        title={isSaved ? "Remove from favourites" : "Add to favourites"}
       >
         ★
       </button>
@@ -560,7 +600,7 @@ function TenderRowCard({ tender, isSaved, onSave, onView }) {
         )}
       </div>
 
-      {/* action */}
+      {/* actions */}
       <div className="tender-actions-nice mt-3 flex flex-col gap-2 sm:flex-row">
         <button onClick={() => onView(false)} className="btn btn-primary glow-cta">
           View details
@@ -573,7 +613,8 @@ function TenderRowCard({ tender, isSaved, onSave, onView }) {
   );
 }
 
-// -------------------------------------------
+/* ========================= SMALL UTILS ========================= */
+
 function nice(v) {
   if (!v) return "";
   const s = String(v).trim();

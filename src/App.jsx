@@ -11,10 +11,14 @@ import TendersPage from "./routes/TendersPage.jsx";
 import About from "./pages/About.jsx";
 import Contact from "./pages/Contact.jsx";
 
+
 export const PrefsContext = React.createContext(null);
 
 export default function App() {
   const auth = useAuth();
+const COGNITO_POOL_ID   = import.meta.env.VITE_COGNITO_POOL_ID;
+const CLIENT_ID         = import.meta.env.VITE_COGNITO_CLIENT_ID;
+const REDIRECT_URI      = import.meta.env.VITE_REDIRECT_URI;
 
   const [showPrefs, setShowPrefs] = useState(false);
 

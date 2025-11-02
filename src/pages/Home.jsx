@@ -164,14 +164,14 @@ export default function Home() {
             ones.
           </p>
           <div className="flex flex-wrap gap-3">
-            <button onClick={handleQuickSearch} className="btn btn-primary glow-cta">
-              Browse tenders
-            </button>
+           <Link to="/tenders" className="btn btn-primary glow-cta">
+  Browse tenders
+</Link>
             <button
               onClick={() => alert("Hook this to Lex / OpenAI modal")}
               className="btn btn-outline ts"
             >
-              Try AI summary
+              Try our Chatbot
             </button>
           </div>
         </div>
@@ -399,15 +399,29 @@ export default function Home() {
       </section>
 
       {/* CTA FOR SNS / SIGNUP */}
-      <section className="cta-panel">
-        <div>
-          <h3 className="text-2xl font-bold text-slate-50">Ready to get notified?</h3>
-          <p className="text-slate-100/80 mt-1">
-            Connect your profile and we’ll send alerts for new tenders in your sector.
-          </p>
-        </div>
-        <button className="btn btn-primary glow-cta">Connect alerts</button>
-      </section>
+<section className="cta-panel">
+  <div>
+    <h3 className="text-2xl font-bold text-slate-50">Ready to get notified?</h3>
+    <p className="text-slate-100/80 mt-1">
+      Connect your profile and we’ll send alerts for new tenders in your sector.
+    </p>
+  </div>
+  <button
+    onClick={() => {
+      const COGNITO_DOMAIN =
+        "https://af-south-1a3zhkvtjp.auth.af-south-1.amazoncognito.com";
+      const CLIENT_ID = "6hrvpmrv13cf2tnj3en148i38q";
+      const REDIRECT_URI = "http://localhost:5173/";
+      window.location.href = `${COGNITO_DOMAIN}/signup?client_id=${CLIENT_ID}&response_type=code&scope=email+openid+profile&redirect_uri=${encodeURIComponent(
+        REDIRECT_URI
+      )}`;
+    }}
+    className="btn btn-primary glow-cta"
+  >
+    Connect alerts
+  </button>
+</section>
+
 
       {/* FOOTER */}
       <footer className="py-6 text-xs text-slate-400 text-center">
