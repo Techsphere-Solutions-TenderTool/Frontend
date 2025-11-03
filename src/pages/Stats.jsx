@@ -17,7 +17,8 @@ import {
   Line,
 } from "recharts";
 // if you already have this hook/context, use it; if not, you can remove the login-aware bits
-import { useAuth } from "../contexts/AuthContext";
+import { useAuth } from "react-oidc-context";
+
 
 // helper: map raw location text to a SA province
 function classifyProvince(raw) {
@@ -187,9 +188,7 @@ export default function Stats() {
       try {
         setLoading(true);
         // 1) get AWS aggregated stats
-        const res = await fetch(
-          import.meta.env.VITE_API_BASE_URL + "/stats"
-        );
+        const res = await fetch(import.meta.env.VITE_STATS_API_URL);
         if (!res.ok) throw new Error("Could not load stats");
         const json = await res.json();
         if (!cancelled) {
