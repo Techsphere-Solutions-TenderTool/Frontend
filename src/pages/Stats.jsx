@@ -1,5 +1,4 @@
 // src/pages/Stats.jsx
-import { getStats } from "../lib/api";
 import React, { useEffect, useState, useMemo } from "react";
 import {
   PieChart,
@@ -466,7 +465,7 @@ export default function Stats() {
                   outerRadius={80}
                   label
                 >
-                  {bySource.map((entry, idx) => (
+                  {bySource.map((entry,_ ) => (
                     <Cell key={entry.name} fill={entry.color} />
                   ))}
                 </Pie>
@@ -531,7 +530,7 @@ export default function Stats() {
                     labelStyle={{ color: "#fff" }}
                   />
                   <Bar dataKey="value" radius={[4, 4, 0, 0]}>
-                    {provinceData.map((p, idx) => (
+                    {provinceData.map((p, _) => (
                       <Cell key={p.name} fill={p.fill} />
                     ))}
                   </Bar>
