@@ -9,25 +9,24 @@ export default function UserPrefsSheet({ onClose }) {
   // Hooks must always be called – even if context is missing.
   const ctx = useContext(PrefsContext);
 
-const [form, setForm] = useState({ 
-  name: "", 
-  location: "", 
-  notifications: "none", 
-  categories: [] 
-});
-const [saving, setSaving] = useState(false);
-const [successMsg, setSuccessMsg] = useState("");
-const [errorMsg, setErrorMsg] = useState("");
+  const [form, setForm] = useState({
+    name: "",
+    location: "",
+    notifications: "none",
+    categories: [],
+  });
+  const [saving, setSaving] = useState(false);
+  const [successMsg, setSuccessMsg] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
 
-//   check context (after all hooks)
-if (!ctx) return null;
+  const { prefs, setPrefs, savedTenders } = ctx || {};
 
-  const { prefs, setPrefs, savedTenders } = ctx;
-
-  // Keep form in sync with global prefs
+  // Keep form in sync with global prefs safely
   useEffect(() => {
-    setForm(prefs);
-  }, [prefs]);
+    if (ctx && prefs) {
+      setForm(prefs);
+    }
+  }, [ctx, prefs]);
 
   const onChange = (e) => {
     const { name, value } = e.target;
@@ -63,21 +62,15 @@ if (!ctx) return null;
       });
 
       if (!res.ok) {
-        // surface a friendly error but keep CI happy
         setSaving(false);
         setErrorMsg("Server rejected the update. Please try again.");
         return;
-        // (no throw so we don't hit the catch with same message)
       }
 
-      // update global ctx
       setPrefs(form);
-
-      // inline success
-      setSuccessMsg("Preferences saved successfully ✅");
+      setSuccessMsg("Preferences saved successfully ");
       setSaving(false);
 
-      // optional auto close
       setTimeout(() => {
         setSuccessMsg("");
         onClose?.();
@@ -89,7 +82,7 @@ if (!ctx) return null;
     }
   };
 
-  // memoize list so it isn’t re-created every render
+  // Memoized list
   const CATEGORIES = useMemo(
     () => [
       "Construction & Civil",
@@ -109,14 +102,17 @@ if (!ctx) return null;
     []
   );
 
+  //  Safe context check AFTER hooks - updated 
+  if (!ctx) {
+    return null;
+  }
+
   return (
     <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 px-3">
-      {/* modal */}
       <div
         className="glass-panel w-full max-w-3xl p-6 space-y-5 rounded-2xl border border-cyan-400/15 shadow-2xl"
         style={{ "--panel-bg": 0.15 }}
       >
-        {/* header */}
         <div className="flex items-start justify-between gap-4">
           <div>
             <h3 className="text-xl font-semibold text-slate-50">Your TenderTool Profile</h3>
@@ -130,14 +126,12 @@ if (!ctx) return null;
           </button>
         </div>
 
-        {/* auth notice */}
         {!auth.isAuthenticated && (
           <p className="text-sm text-amber-100/90 bg-amber-500/10 border border-amber-200/30 rounded-md px-3 py-2">
             You are not logged in. Log in to save tenders and keep your preferences.
           </p>
         )}
 
-        {/* feedback banners */}
         {successMsg && (
           <div className="bg-emerald-500/10 border border-emerald-300/30 text-emerald-100 text-sm px-3 py-2 rounded-md">
             {successMsg}
@@ -149,9 +143,7 @@ if (!ctx) return null;
           </div>
         )}
 
-        {/* body */}
         <div className="grid md:grid-cols-2 gap-6">
-          {/* left column: basic info */}
           <div className="space-y-3">
             <label className="block text-xs uppercase text-slate-200/70 tracking-wide">
               Name (optional)
@@ -189,24 +181,19 @@ if (!ctx) return null;
               </select>
             </label>
 
-            {/* saved tenders box */}
             <div className="bg-slate-900/40 rounded-lg p-3 mt-3">
               <div className="flex items-center justify-between">
                 <span className="text-xs uppercase text-slate-200/70">Saved tenders</span>
-                <span className="text-sm font-semibold text-slate-50">
-                  {savedTenders?.length ?? 0}
-                </span>
+                <span className="text-sm font-semibold text-slate-50">{savedTenders?.length ?? 0}</span>
               </div>
             </div>
           </div>
 
-          {/* right column: categories */}
           <div>
             <label className="block text-xs uppercase text-slate-200/70 mb-2 tracking-wide">
               Tender Categories (choose one or more)
             </label>
 
-            {/* scroll area */}
             <div className="max-h-60 overflow-y-auto pr-2 space-y-1">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-1">
                 {CATEGORIES.map((cat) => (
@@ -232,7 +219,6 @@ if (!ctx) return null;
           </div>
         </div>
 
-        {/* footer */}
         <div className="flex justify-end gap-2 pt-2">
           <button onClick={onClose} className="btn btn-outline ts text-sm">
             Cancel
@@ -250,3 +236,4 @@ if (!ctx) return null;
     </div>
   );
 }
+
