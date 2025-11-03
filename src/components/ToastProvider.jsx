@@ -15,7 +15,7 @@ function makeToast(id, kind, message) {
   return { id, kind, message };
 }
 
-export default function ToastProvider({ children }) {
+export function ToastProvider({ children }) {
   const [toasts, setToasts] = useState([]);
   const timersRef = useRef(new Map());
 
@@ -46,7 +46,6 @@ export default function ToastProvider({ children }) {
     [push]
   );
 
-  // portal target
   const portalTarget = typeof document !== "undefined" ? document.body : null;
 
   return (

@@ -134,43 +134,48 @@ export async function listTenders(filters = {}) {
     pageSize = 20,
     q = "",
     sort = "-closing_at",
-
-    // optional filters (your backend may use/ignore)
     source,
     category,
     location,
     buyer,
     status,
-
-    // published date range
     from,
     to,
-
-    // closing ranges
     closingFrom,
     closingTo,
     closing_after,
     closing_before,
+    // Include offset and limit in destructuring to use if provided
+    offset,
+    limit,
   } = filters;
 
-  const query = {
-    page,
-    pageSize,
-    limit: pageSize,
-    offset: (page - 1) * pageSize,
-    q,
-    sort,
-  };
+  const query = {};
 
+  if (offset !== undefined) {
+    // Use explicit offset/limit for pagination if provided
+    query.offset = Number(offset);
+    query.limit = limit !== undefined ? Number(limit) : pageSize;
+  } else {
+    // Default to page-based pagination
+    query.page = page;
+    query.pageSize = pageSize;
+    query.limit = pageSize;
+    query.offset = (page - 1) * pageSize;
+  }
+
+  // Text search and sorting
+  query.q = q;
+  query.sort = sort;
+
+  // Optional filters
   if (source) query.source = source;
   if (category) query.category = category;
   if (location) query.location = location;
   if (buyer) query.buyer = buyer;
   if (status) query.status = status;
-
   if (from) query.published_from = from;
   if (to) query.published_to = to;
-
   if (closingFrom) query.closing_after = closingFrom;
   if (closingTo) query.closing_before = closingTo;
   if (closing_after) query.closing_after = closing_after;
@@ -179,6 +184,7 @@ export async function listTenders(filters = {}) {
   const data = await http(`/tenders${qs(query)}`);
   return normalizeListPayload(data);
 }
+
 
 export async function getTenderById(id) {
   return http(`/tenders/${encodeURIComponent(id)}`);

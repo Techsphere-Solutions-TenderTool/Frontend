@@ -1,6 +1,7 @@
 import React, { useContext, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { MapPin, CalendarDays, Clock4, Star } from "lucide-react";
+
 import { listTenders, cacheTender } from "../lib/api.js";
 import useDebouncedValue from "../hooks/useDebouncedValue.js";
 import { PrefsContext } from "../contexts/PrefsContext.js";
@@ -148,10 +149,11 @@ export default function TendersPage() {
     }
 
     // publisher
-    if (source) {
-      const wanted = source.toLowerCase();
-      filtered = filtered.filter((t) => getSourceSlug(t) === wanted);
-    }
+  if (source) {
+  const wanted = source.toLowerCase();
+  filtered = filtered.filter(t => t.source.toLowerCase() === wanted);
+}
+
 
     // category
     if (category) {
@@ -445,6 +447,8 @@ export default function TendersPage() {
             {displayRows.map((t) => {
               const id = t.id ?? t.referenceNumber;
               const isSaved = savedIds.includes(id);
+              console.log("Display rows:", displayRows);
+
               return (
                 <TenderCard
                   key={id}
@@ -551,7 +555,7 @@ function TenderCard({ tender, isSaved, onSave, onView, onAi }) {
   const statusInfo = buildStatusChip(closing);
   const badge = buildBadge(tender.published_at);
   const countdown = humanCountdown(closing);
-
+if (!tender.title || tender.title === "Tender") return null;
   return (
     <article className="tt-card">
       {/* Top row */}

@@ -2,8 +2,9 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { useAuth } from "react-oidc-context";
+import { ToastProvider } from "./components/ToastProvider.jsx";
+import { useToast } from "./components/ToastProvider.jsx";
 
-import ToastProvider, { useToast } from "./components/ToastProvider.jsx";
 import Navbar from "./components/Navbar.jsx";
 import UserPrefsSheet from "./components/UserPrefsSheet.jsx";
 import TenderDetailsPage from "./routes/TenderDetailsPage.jsx";
