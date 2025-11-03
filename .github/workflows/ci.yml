@@ -37,8 +37,10 @@ jobs:
 
       - name: Build project
         run: npm run build
+        env:
+          VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL }}
+          VITE_CHATBOT_API_URL: ${{ secrets.VITE_CHATBOT_API_URL }}
 
-      # ✅ Use run instead of uses here
       - name: Deploy to S3
         run: |
           aws s3 sync ./dist s3://tendertool-site --region af-south-1 --delete
