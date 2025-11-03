@@ -38,17 +38,14 @@ jobs:
       - name: Build project
         run: npm run build
 
+      # ✅ Use run instead of uses here
       - name: Deploy to S3
-        uses: aws-actions/s3-sync@v1
-        with:
-          args: --delete
-        env:
-          AWS_S3_BUCKET: tendertool-site
-          AWS_REGION: af-south-1
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
           aws s3 sync ./dist s3://tendertool-site --region af-south-1 --delete
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: af-south-1
 
       - name: Invalidate CloudFront cache
         run: |
