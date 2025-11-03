@@ -198,7 +198,8 @@ function readCache() {
 }
 function writeCache(obj) {
   try { sessionStorage.setItem(CACHE_KEY, JSON.stringify(obj)); }
-  catch {}
+  catch {err}
+  console.warn("Handled silently:", err);
 }
 export function cacheTender(row) {
   if (!row?.id) return;
@@ -247,6 +248,7 @@ export async function getTenderDocuments(tenderId) {
     return normalizeDocuments(data);
   } catch (err) {
     // fallback endpoint
+    console.warn("Primary document endpoint failed, falling back:", err);
     const data = await http(`/documents${qs({ tenderId })}`);
     return normalizeDocuments(data);
   }
@@ -257,6 +259,7 @@ export async function getTenderContacts(tenderId) {
     const data = await http(`/tenders/${encodeURIComponent(tenderId)}/contacts`);
     return normalizeContacts(data);
   } catch (err) {
+    console.warn("Primary contact endpoint failed, falling back:", err);
     const data = await http(`/contacts${qs({ tenderId })}`);
     return normalizeContacts(data);
   }

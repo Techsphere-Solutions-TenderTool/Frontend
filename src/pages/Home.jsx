@@ -448,7 +448,7 @@ export default function Home() {
 }
 
 /* ===================== TENDER CARD (UNIFIED) ===================== */
-function TenderCard({ tender, isLoggedIn }) {
+function TenderCard({ tender }) {
   const ctx = useContext(PrefsContext);
   const canSave = ctx?.canSave;
   const savedIds = ctx?.savedTenders || [];
@@ -570,7 +570,7 @@ function TenderCard({ tender, isLoggedIn }) {
             onClick={() => {
               try {
                 cacheTender({ ...tender, id });
-              } catch (e) {
+              } catch (_) {
                 /* ignore */
               }
             }}
