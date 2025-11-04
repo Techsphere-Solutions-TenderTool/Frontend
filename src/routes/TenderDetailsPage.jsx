@@ -20,6 +20,9 @@ import {
   buildStatusFromClosing,
   prettyCategory,
 } from "../lib/tenderUtils.js";
+import { useAuth } from "react-oidc-context";
+import { useToast } from "../components/ToastProvider.jsx";
+
 
 export default function TenderDetailsPage() {
   const { id } = useParams();
@@ -46,6 +49,8 @@ export default function TenderDetailsPage() {
   const [aiText, setAiText] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState("");
+  const auth = useAuth();
+const toast = useToast();
 
   // Load main tender
   useEffect(() => {
@@ -133,31 +138,37 @@ export default function TenderDetailsPage() {
   }
 
   async function handleGenerateSummary() {
-    if (!row) return;
-    setShowAi(true);
-    setAiLoading(true);
-    setAiError("");
-    setAiText("");
-
-    try {
-      const sourceRaw = row.source || row.publisher || row.buyer || "";
-      const payload = {
-        id: row.id || id,
-        title: row.title,
-        description: row.summary || row.description || "",
-        buyer: row.buyer,
-        source: prettySource(sourceRaw),
-        closingDate: row.closing_at,
-        location: row.location,
-      };
-      const result = await summariseTender(payload);
-      setAiText(result.summary || "AI did not return a summary.");
-    } catch (e) {
-      setAiError(e.message || "Failed to generate summary.");
-    } finally {
-      setAiLoading(false);
-    }
+  if (!auth.isAuthenticated) {
+    toast.error("Please log in to use AI features.");
+    return;
   }
+
+  if (!row) return;
+  setShowAi(true);
+  setAiLoading(true);
+  setAiError("");
+  setAiText("");
+
+  try {
+    const sourceRaw = row.source || row.publisher || row.buyer || "";
+    const payload = {
+      id: row.id || id,
+      title: row.title,
+      description: row.summary || row.description || "",
+      buyer: row.buyer,
+      source: prettySource(sourceRaw),
+      closingDate: row.closing_at,
+      location: row.location,
+    };
+    const result = await summariseTender(payload);
+    setAiText(result.summary || "AI did not return a summary.");
+  } catch (e) {
+    setAiError(e.message || "Failed to generate summary.");
+  } finally {
+    setAiLoading(false);
+  }
+}
+
 
   if (loading) {
     return (

@@ -18,6 +18,9 @@ import {
   makeComparator,
   buildPageList,
 } from "../lib/tenderUtils.js";
+import { useAuth } from "react-oidc-context";
+import { useToast } from "../components/ToastProvider.jsx";
+
 
 /* ===================== CONFIG ===================== */
 const CATEGORIES = [
@@ -72,6 +75,10 @@ export default function TendersPage() {
   // UI
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  const auth = useAuth();
+  const toast = useToast();
+
 
   // Reset to page 1 when filters or sort/view change
   useEffect(() => {
@@ -455,16 +462,20 @@ export default function TendersPage() {
                   tender={t}
                   isSaved={isSaved}
                   onSave={() => {
-                    if (!canSave) {
-                      alert("Please log in to save tenders.");
-                      return;
+                   if (!auth.isAuthenticated) {
+                     toast.error("Please log in to save tenders.");
+                     return;
                     }
-                    if (isSaved) {
-                      removeSaved?.(id);
-                    } else {
-                      addSaved?.(id);
-                    }
-                    cacheTender({ ...t, id });
+
+                  if (isSaved) {
+                    removeSaved?.(id);
+                  toast.success("Removed from favourites.");
+                   } else {
+                   addSaved?.(id);
+                  toast.success("Saved to favourites.");
+                 }
+
+                   cacheTender({ ...t, id });
                   }}
                   onView={() => {
                     cacheTender({ ...t, id });
@@ -534,7 +545,20 @@ export default function TendersPage() {
 }
 
 /* ===================== TENDER CARD ===================== */
-function TenderCard({ tender, isSaved, onSave, onView, onAi }) {
+import { Link } from "react-router-dom";
+
+function TenderCard({ tender, isSaved, onSave, onAi }) {
+  const id = tender.id ?? tender.referenceNumber;
+
+  // Skip cards with no ID
+  if (!id) {
+    console.warn("Tender missing ID, skipping:", tender);
+    return null;
+  }
+
+  // Skip incomplete scraper junk rows
+  if (!tender.title || tender.title === "Tender") return null;
+
   const title = tender.title || "Untitled tender";
 
   const categoryRaw = tender.category;
@@ -555,18 +579,22 @@ function TenderCard({ tender, isSaved, onSave, onView, onAi }) {
   const statusInfo = buildStatusChip(closing);
   const badge = buildBadge(tender.published_at);
   const countdown = humanCountdown(closing);
-if (!tender.title || tender.title === "Tender") return null;
+
   return (
     <article className="tt-card">
       {/* Top row */}
       <div className="tt-card-top">
         <div className="flex gap-2 flex-wrap">
           {badge && (
-            <span className="tt-chip tt-chip-accent text-[10px] font-bold px-2 py-0.5">{badge}</span>
+            <span className="tt-chip tt-chip-accent text-[10px] font-bold px-2 py-0.5">
+              {badge}
+            </span>
           )}
           {category && <span className="tt-chip tt-chip-blue">{category}</span>}
           {sourceName && <span className="tt-chip tt-chip-cyan">{sourceName}</span>}
-          {statusInfo && <span className={`tt-chip ${statusInfo.className}`}>{statusInfo.label}</span>}
+          {statusInfo && (
+            <span className={`tt-chip ${statusInfo.className}`}>{statusInfo.label}</span>
+          )}
         </div>
 
         <button
@@ -608,7 +636,11 @@ if (!tender.title || tender.title === "Tender") return null;
         {published && (
           <span className="tt-meta-item">
             <CalendarDays size={14} className="tt-meta-icon" />
-            {published.toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" })}
+            {published.toLocaleDateString("en-ZA", {
+              day: "numeric",
+              month: "short",
+              year: "numeric",
+            })}
           </span>
         )}
         {closing && isFuture(closing) && countdown && (
@@ -619,25 +651,39 @@ if (!tender.title || tender.title === "Tender") return null;
         )}
       </div>
 
-      {/* Footer: fixed at bottom */}
+      {/* Footer */}
       <div className="tt-footer mt-auto">
         <div className="flex items-center gap-2 w-full">
-          <button onClick={onView} className="tt-view-btn w-full" type="button">
-            View details
-          </button>
-          <button
-            onClick={onAi}
-            className="btn btn-outline ts text-xs px-3 py-2 whitespace-nowrap"
-            type="button"
-            title="Open with Gen-AI summary"
+          <Link
+            to={`/tenders/${id}`}
+            state={{ row: { ...tender, id }, openAi: false }}
+            className="tt-view-btn w-full"
+            onClick={() => cacheTender({ ...tender, id })}
           >
-            AI summary
-          </button>
+            View details
+          </Link>
+
+          <button
+  onClick={() => {
+    if (!auth.isAuthenticated) {
+      toast.error("Please log in to use AI features.");
+      return;
+    }
+    onAi();
+  }}
+  className="btn btn-outline ts text-xs px-3 py-2 whitespace-nowrap"
+  type="button"
+  title="Open with Gen-AI summary"
+>
+  AI summary
+</button>
+
         </div>
       </div>
     </article>
   );
 }
+
 
 /* ===================== FILTER CHIP ===================== */
 function FilterChip({ label, value, onClear }) {
