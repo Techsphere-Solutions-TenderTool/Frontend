@@ -1,50 +1,60 @@
-name: Frontend CI
+name: Frontend CI/CD
 
 on:
-  pull_request:
-    branches: [dev, main]
   push:
-    branches: [dev]
-
-permissions:
-  contents: read
+    branches:
+      - main
 
 jobs:
-  ci:
+  build-test-analyze-deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: 20
 
-      - name: Install
+      - name: Install dependencies
         run: npm ci
 
-      - name: Prepare env for CI
-        run: cp .env.test .env
+      - name: Run Vitest unit tests
+        run: npm test
 
-      - name: Lint
-        run: npm run lint
-
-      - name: Prettier check (optional)
-        run: npx prettier -c .
-
-      - name: Tests (coverage)
-        run: npm run test:coverage
-
-      - name: Build
-        run: npm run build
-
-      - name: Upload dist
-        uses: actions/upload-artifact@v4
+      - name: SonarQube Scan
+        uses: SonarSource/sonarcloud-github-action@v2
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
-          name: dist
-          path: dist
-          retention-days: 7
+          args: >
+            -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }}
+            -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION_KEY }}
+            -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }}
+            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+
+      - name: Build project
+        run: npm run build
+        env:
+          VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL }}
+          VITE_CHATBOT_API_URL: ${{ secrets.VITE_CHATBOT_API_URL }}
+
+      - name: Deploy to S3
+        run: |
+          aws s3 sync ./dist s3://tendertool-site --region af-south-1 --delete
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: af-south-1
+
+      - name: Invalidate CloudFront cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id E3R5BRK1RTZIQH \
+            --paths "/*"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: af-south-1

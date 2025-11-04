@@ -13,6 +13,7 @@ import TendersPage from "./routes/TendersPage.jsx";
 import About from "./pages/About.jsx";
 import Contact from "./pages/Contact.jsx";
 import ChatWidget from "./components/ChatWidget.jsx";
+import Stats from "./pages/Stats.jsx";
 
 
 import { PrefsContext } from "./contexts/PrefsContext.js";
@@ -194,6 +195,7 @@ function AppInner() {
               <Route path="/about" element={<About />} />
               <Route path="/contact" element={<Contact />} />
               <Route path="/tenders/:id" element={<TenderDetailsPage />} />
+              <Route path="/stats" element={<Stats />} />
             </Routes>
           </main>
         </div>

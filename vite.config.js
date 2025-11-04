@@ -25,4 +25,15 @@ export default defineConfig({
       },
     },
   },
+
+  // Vitest configuration
+  test: {
+    globals: true,
+    environment: "jsdom",
+    setupFiles: "./src/setupTests.js",
+    coverage: {
+      reporter: ["text", "lcov"],
+      reportsDirectory: "./coverage",
+    },
+  }, 
 });
