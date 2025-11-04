@@ -127,16 +127,17 @@ TenderTool follows a cloud-native, multi-tier design:
 
 | Page | Screenshots |
 |------|-------------|
-| Home | <img src="/main/TT-IMAGES/home%20screen1%20.png" width="250"/> <br><img src="main/TT-IMAGES/home%20screen%202.png" width="250"/> |
-| Register | <img src="images/register1.png" width="250"/> <br><img src="images/register2.png" width="250"/> |
-| Login | <img src="images/register1.png" width="250"/> <br><img src="images/register2.png" width="250"/> |
-| User Preferances | <img src="images/register1.png" width="250"/> <br><img src="images/register2.png" width="250"/> |
-| Tenders | <img src="images/register1.png" width="250"/> <br><img src="images/register2.png" width="250"/> |
-| Tender Details | <img src="images/register1.png" width="250"/> <br><img src="images/register2.png" width="250"/> |
-| Chatbot | <img src="images/register1.png" width="250"/> <br><img src="images/register2.png" width="250"/> |
-| AboutUs | <img src="images/register1.png" width="250"/> <br><img src="images/register2.png" width="250"/> |
-| Contact Us  | <img src="images/register1.png" width="250"/> <br><img src="images/register2.png" width="250"/> |
+| Home | <img src="https://github.com/Techsphere-Solutions-TenderTool/Frontend/blob/main/TT-IMAGES/home%20screen1%20.png" width="250"/> <br><img src="https://github.com/Techsphere-Solutions-TenderTool/Frontend/blob/main/TT-IMAGES/home%20screen%202.png" width="250"/> |<br><img src="https://github.com/Techsphere-Solutions-TenderTool/Frontend/blob/main/TT-IMAGES/homescreen3.png" width="250"/> ||<br><img src="https://github.com/Techsphere-Solutions-TenderTool/Frontend/blob/main/TT-IMAGES/h5.png" width="250"/> |
+| Login | <img src="https://github.com/Techsphere-Solutions-TenderTool/Frontend/blob/main/TT-IMAGES/l1.png" width="250"/> <br><img src="https://github.com/Techsphere-Solutions-TenderTool/Frontend/blob/main/TT-IMAGES/l2.png" width="250"/> |
+| User Preferances | <img src="https://github.com/Techsphere-Solutions-TenderTool/Frontend/blob/main/TT-IMAGES/l5.png"/>|
+| Tenders | <img src="https://github.com/Techsphere-Solutions-TenderTool/Frontend/blob/main/TT-IMAGES/h8.png" width="250"/> <br><img src="https://github.com/Techsphere-Solutions-TenderTool/Frontend/blob/main/TT-IMAGES/h9.png" width="250"/> |<br><img src="https://github.com/Techsphere-Solutions-TenderTool/Frontend/blob/main/TT-IMAGES/h10.png" width="250"/> |
+| Tender Details | <img src="https://github.com/Techsphere-Solutions-TenderTool/Frontend/blob/main/TT-IMAGES/l3.png"/> <br> <img src="https://github.com/Techsphere-Solutions-TenderTool/Frontend/blob/main/TT-IMAGES/l3.png"/> <br><img src="https://github.com/Techsphere-Solutions-TenderTool/Frontend/blob/main/TT-IMAGES/l4.png" width="250"/> | <br><img src="https://github.com/Techsphere-Solutions-TenderTool/Frontend/blob/main/TT-IMAGES/l6.png" width="250"/> |
+| Stats | <img src="https://github.com/Techsphere-Solutions-TenderTool/Frontend/blob/main/TT-IMAGES/h11.png" width="250"/> <br><img src="https://github.com/Techsphere-Solutions-TenderTool/Frontend/blob/main/TT-IMAGES/h12.png" width="250"/> |
+| Chatbot | <img src="https://github.com/Techsphere-Solutions-TenderTool/Frontend/blob/main/TT-IMAGES/h7.png" width="250"/> <br><img src="https://github.com/Techsphere-Solutions-TenderTool/Frontend/blob/main/TT-IMAGES/h8.png" width="250"/> |
+| AboutUs | <img src="https://github.com/Techsphere-Solutions-TenderTool/Frontend/blob/main/TT-IMAGES/h13.png" width="250"/> <br><img src="https://github.com/Techsphere-Solutions-TenderTool/Frontend/blob/main/TT-IMAGES/h14.png" width="250"/> |<img src="https://github.com/Techsphere-Solutions-TenderTool/Frontend/blob/main/TT-IMAGES/h15.png" width="250"/> <br><img src="https://github.com/Techsphere-Solutions-TenderTool/Frontend/blob/main/TT-IMAGES/h16.png" width="250"/> |
+| Contact Us  | <img src="https://github.com/Techsphere-Solutions-TenderTool/Frontend/blob/main/TT-IMAGES/h17.png" width="250"/> <br><img src="https://github.com/Techsphere-Solutions-TenderTool/Frontend/blob/main/TT-IMAGES/h18.png" width="250"/> |
 ---
+https://github.com/Techsphere-Solutions-TenderTool/Frontend/blob/main/TT-IMAGES/h11.png
 
 ---
 
