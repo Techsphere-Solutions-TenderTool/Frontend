@@ -3,6 +3,8 @@ import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { askChatbot } from "../lib/chatbot";
 import { textToSpeech } from "../lib/polly";
+import { useAuth } from "react-oidc-context";
+import { useToast } from "../components/ToastProvider.jsx";
 
 // Suggested quick replies
 const QUICK_REPLIES = [
@@ -38,6 +40,8 @@ export default function ChatWidget() {
   const [audioEnabled, setAudioEnabled] = useState(true);
   const inputRef = useRef(null);
   const messagesEndRef = useRef(null);
+  const auth = useAuth();
+const toast = useToast();
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -84,6 +88,12 @@ export default function ChatWidget() {
   };
 
   async function sendMessage(text = null) {
+
+if (!auth.isAuthenticated) {
+  toast.error("Please log in to use the chatbot.");
+  return;
+}
+
     const messageText = (text || input).trim();
     if (!messageText || loading) return;
 
@@ -104,10 +114,7 @@ export default function ChatWidget() {
       const botMsg = { from: "bot", text: reply || "…", id: botMsgId };
       setMessages((p) => [...p, botMsg]);
 
-      // Auto-play audio for bot responses (best-effort)
-      if (audioEnabled && reply) {
-        setTimeout(() => playAudio(reply, botMsgId), 300);
-      }
+      
     } catch (err) {
       console.error("❌ Chatbot error:", err);
       const errorMsg = err.message || "Something went wrong";
