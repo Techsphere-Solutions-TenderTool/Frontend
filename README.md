@@ -1,6 +1,5 @@
 
 ## <p align="center">
-
   <img src="https://github.com/Techsphere-Solutions-TenderTool/Frontend/blob/main/TT-IMAGES/techsphere-logo.png" width="220" alt="TenderTool Logo"/>
 </p>
 
@@ -137,8 +136,6 @@ TenderTool follows a cloud-native, multi-tier design:
 | AboutUs | <img src="https://github.com/Techsphere-Solutions-TenderTool/Frontend/blob/main/TT-IMAGES/h13.png" width="250"/> <br><img src="https://github.com/Techsphere-Solutions-TenderTool/Frontend/blob/main/TT-IMAGES/h14.png" width="250"/> |<img src="https://github.com/Techsphere-Solutions-TenderTool/Frontend/blob/main/TT-IMAGES/h15.png" width="250"/> <br><img src="https://github.com/Techsphere-Solutions-TenderTool/Frontend/blob/main/TT-IMAGES/h16.png" width="250"/> |
 | Contact Us  | <img src="https://github.com/Techsphere-Solutions-TenderTool/Frontend/blob/main/TT-IMAGES/h17.png" width="250"/> <br><img src="https://github.com/Techsphere-Solutions-TenderTool/Frontend/blob/main/TT-IMAGES/h18.png" width="250"/> |
 ---
-https://github.com/Techsphere-Solutions-TenderTool/Frontend/blob/main/TT-IMAGES/h11.png
-
 ---
 
 ## 🧰 Tech Stack
@@ -229,9 +226,21 @@ Uses **GitHub Actions** for deployment pipelines and testing.
 * OWASP Secrets Management Cheat Sheet (2023)
 * GitHub Actions + Amplify Integration (2025)
 
+  
+  
+## 📄 License
+
+This project is licensed under the [MIT License](https://opensource.org/licenses/MIT).
+
+You are free to use, modify, and distribute this software in both personal and commercial projects, provided that the original copyright and license notice are included.
+
+© 2025 Techsphere Solutions — TenderTool. All rights reserved.
+
 <p align="center">
-  <img src="https://media.giphy.com/media/NdieEAYwEZJot8ZA92/giphy.gif" width="380"/>
+  <img src="https://media4.giphy.com/media/v1.Y2lkPWFkZWE2ZTUydzF0NjUzd2NlbHU2aGFrODZyNmNzYmZqMmU5d3NoNmhsajFqeGd1cCZlcD12MV9naWZzX3NlYXJjaCZjdD1n/970Sr8vpwEbXG/giphy.gif" width="380"/>
 </p>
+
+
 
 ---
 
