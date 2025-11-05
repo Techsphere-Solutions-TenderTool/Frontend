@@ -1,6 +1,6 @@
 
 ## <p align="center">
-  <img src="https://github.com/Techsphere-Solutions-TenderTool/Frontend/blob/main/TT-IMAGES/techsphere-logo.png" width="220" alt="TenderTool Logo"/>
+  <img src="https://github.com/Techsphere-Solutions-TenderTool/Frontend/blob/main/TT-IMAGES/techsphere-logo.png.png" width="220" alt="TenderTool Logo"/>
 </p>
 
 # TenderTool
